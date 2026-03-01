@@ -1,0 +1,35 @@
+--- packages/mcp-server/src/tools.ts
++++ packages/mcp-server/src/tools.ts
+@@ -183,16 +183,23 @@
+         };
+       } else if (name === "continue_edit") {
+-        const result = await core.invoke("mcp/getPrompt", {
+-          serverName: "continue",
+-          promptName: "edit",
+-          args: {
+-            filepath: args?.filepath as string,
+-            instruction: args?.instruction as string,
+-            range: JSON.stringify(args?.range)
+-          }
++        let resultStr = "";
++        for await (const diffLine of core.invoke("streamDiffLines", {
++          prefix: "",
++          highlighted: "",
++          suffix: "",
++          input: args?.instruction as string,
++          language: "typescript",
++          modelTitle: "",
++          completionOptions: {}
++        })) {
++          // Instead of manually accumulating and returning we would typically
++          // apply it or just return the diff generated
++          resultStr += JSON.stringify(diffLine) + "\n";
++        }
++
++        return {
++          content: [{ type: "text", text: resultStr }]
+         });
+-        return {
+-          content: [{ type: "text", text: JSON.stringify(result) }]
+-        };
+       } else if (name === "continue_context_retrieval") {

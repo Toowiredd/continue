@@ -9,7 +9,6 @@
     "test": "jest"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^5.2.1"
   },
   "devDependencies": {
@@ -20,5 +19,8 @@
     "ts-jest": "^29.4.6",
     "typescript": "^5.9.3",
     "uuid": "^9.0.1"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
   }
 }

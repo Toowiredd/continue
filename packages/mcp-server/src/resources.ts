@@ -4,7 +4,7 @@ import {
   ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Core } from "core/core";
+import { Core } from "core";
 
 export function registerResources(server: Server, core: Core) {
   server.setRequestHandler(ListResourcesRequestSchema, async () => {

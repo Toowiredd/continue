@@ -4,7 +4,7 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Core } from "core/core";
+import { Core } from "core";
 
 export function registerTools(server: Server, core: Core) {
   const tools: Tool[] = [
@@ -171,17 +171,20 @@ export function registerTools(server: Server, core: Core) {
           content: [{ type: "text", text: resultStr }]
         };
       } else if (name === "continue_edit") {
-        const result = await core.invoke("mcp/getPrompt", {
-          serverName: "continue",
-          promptName: "edit",
-          args: {
-            filepath: args?.filepath as string,
-            instruction: args?.instruction as string,
-            range: JSON.stringify(args?.range)
-          }
-        });
+        let resultStr = "";
+        for await (const diffLine of core.invoke("streamDiffLines", {
+          prefix: "",
+          highlighted: "",
+          suffix: "",
+          input: args?.instruction as string,
+          language: "typescript",
+          modelTitle: "",
+          completionOptions: {}
+        })) {
+          resultStr += JSON.stringify(diffLine) + "\n";
+        }
         return {
-          content: [{ type: "text", text: JSON.stringify(result) }]
+          content: [{ type: "text", text: resultStr }]
         };
       } else if (name === "continue_context_retrieval") {
         const result = await core.invoke("context/getContextItems", {

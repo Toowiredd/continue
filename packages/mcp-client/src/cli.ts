@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { ContinueMcpClient } from "./index.js";
+import * as path from "path";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -40,7 +41,7 @@ async function main() {
       // Connect to the local Continue MCP server for testing stdio
       const command = "node";
       const serverArgs = [
-        "../mcp-server/dist/index.js",
+        path.resolve(__dirname, "../../mcp-server/dist/index.js"),
       ];
       await client.connectStdio(command, serverArgs);
     }

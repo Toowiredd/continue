@@ -2,10 +2,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
-import { Core } from "core/core";
+import { Core } from "core";
 import { InProcessMessenger } from "core/protocol/messenger";
 import { HeadlessIDE } from "./headlessIde";
 import { registerTools } from "./tools";
+import { registerResources } from "./resources";
 
 export class ContinueMcpServer {
   public server: Server;
@@ -31,6 +32,7 @@ export class ContinueMcpServer {
     this.core = new Core(messenger, ide);
 
     registerTools(this.server, this.core);
+    registerResources(this.server, this.core);
   }
 
   async start(transportType: "stdio" | "sse" = "stdio", port: number = 3100) {
