@@ -145,6 +145,16 @@
           "type": "number",
           "default": 60,
           "description": "The period of time in minutes between automatic syncs."
+        },
+        "continue.mcpServer.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the Continue MCP Server"
+        },
+        "continue.mcpServer.port": {
+          "type": "number",
+          "default": 3100,
+          "description": "Port for the Continue MCP Server SSE transport"
         }
       }
     },
@@ -774,7 +784,8 @@
     "vitest": "^3.1.4",
     "vscode-languageclient": "^8.0.2",
     "ws": "^8.13.0",
-    "yarn": "^1.22.21"
+    "yarn": "^1.22.21",
+    "@continue/mcp-server": "*"
   },
   "overrides": {
     "vitest": {
