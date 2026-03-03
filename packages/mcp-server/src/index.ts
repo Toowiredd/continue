@@ -16,15 +16,17 @@ export class ContinueMcpServer {
   constructor() {
     this.server = new Server(
       {
-        name: "continue",
+        name: "continue-swe",
         version: "1.0.0",
+        description:
+          "Continue.dev as a standalone MCP server — full SWE dev toolkit (file I/O, bash, search, git, LLM chat, codebase indexing)",
       },
       {
         capabilities: {
           tools: {},
           resources: {},
         },
-      }
+      },
     );
 
     const ide = new HeadlessIDE();
@@ -35,11 +37,12 @@ export class ContinueMcpServer {
     registerResources(this.server, this.core);
   }
 
-  async start(transportType: "stdio" | "sse" = "stdio", port: number = 3100) {
+  async start(transportType: "stdio" | "sse" = "stdio", port = 3100) {
     if (transportType === "stdio") {
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      console.log("Continue MCP Server running on stdio");
+      // Use stderr so Claude Desktop / other clients can see this without polluting stdio
+      process.stderr.write("Continue SWE MCP Server running on stdio\n");
     } else {
       const app = express();
 
@@ -57,13 +60,39 @@ export class ContinueMcpServer {
       });
 
       app.listen(port, () => {
-        console.log(`Continue MCP Server running on SSE at http://localhost:${port}/mcp`);
+        process.stderr.write(
+          `Continue SWE MCP Server running on SSE at http://localhost:${port}/mcp\n`,
+        );
       });
     }
   }
 }
 
+/** Programmatic API — called by VS Code extension */
 export const start = (transport: "stdio" | "sse" = "stdio", port?: number) => {
   const server = new ContinueMcpServer();
   return server.start(transport, port);
 };
+
+// ---------------------------------------------------------------------------
+// Direct CLI entry point:  node dist/index.js [--transport stdio|sse] [--port N]
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  let transport: "stdio" | "sse" = "stdio";
+  let port = 3100;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--transport" && args[i + 1]) {
+      transport = args[++i] as "stdio" | "sse";
+    } else if (args[i] === "--port" && args[i + 1]) {
+      port = parseInt(args[++i], 10);
+    }
+  }
+
+  start(transport, port).catch((err) => {
+    process.stderr.write(`Fatal: ${err}\n`);
+    process.exit(1);
+  });
+}
+
