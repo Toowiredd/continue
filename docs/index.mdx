@@ -1,148 +1,35 @@
 ---
-title: "Welcome to Continue"
-icon: book-open
-description: "Practice Continuous AI with an open-source CLI, open-source IDE extensions, and a Hub for custom agents"
+title: "What is Continue?"
 ---
 
-<Frame>
-  <img src="/images/intro-0c302b9c15b890c251b1ad04586c880f.png" />
-</Frame>
+Continue runs AI checks on every pull request. Each check is a markdown file in your repo that shows up as a GitHub status check — green if the code looks good, red with a suggested fix if not.
 
-<Note>
-  **Build faster with AI across your IDE, terminal, and CI/CD pipelines with
-  Continue.**
-</Note>
+<video autoPlay muted loop playsInline className="rounded-xl" src="https://continue.dev/videos/demo.mp4" />
 
-## Continue CLI
+## Quickstart
 
-<Info>Terminal-native AI coding assistance with TUI and headless modes.</Info>
+1. Go to [continue.dev/check](https://continue.dev/check) to run checks on a pull request.
 
-<CodeGroup>
+## How it works
 
-    ```bash npm
-    npm install -g @continuedev/cli
-    ```
+You define checks as markdown files in `.continue/checks/`. Each file has a name, a description, and a prompt that tells the AI what to look for.
 
-    ```bash yarn
-    yarn global add @continuedev/cli
-    ```
+```markdown .continue/checks/security-review.md
+---
+name: Security Review
+description: Flag hardcoded secrets and missing input validation
+---
 
-    ```bash pnpm
-    pnpm add -g @continuedev/cli
-    ```
+Review this pull request for security issues.
 
-</CodeGroup>
+Flag as failing if any of these are true:
 
-<CardGroup cols={2}>
-  <Card
-    title="TUI Mode"
-    icon="terminal"
-    href="/cli/overview#tui-mode%3A-interactive-development"
-  >
-    Interactive terminal interface for development workflows
-    <br />
-    <sub>• Automate builds & refactoring</sub>
-    <br />
-    <sub>• Pre-commit hooks & scripted fixes</sub>
-    <br />
-    <sub>• Terminal-first development</sub>
-  </Card>
-  <Card
-    title="Headless Mode"
-    icon="server"
-    href="/cli/overview#headless-mode%3A-production-automation"
-  >
-    Automated AI coding for CI/CD and server environments
-    <br />
-    <sub>• Run in CI/CD pipelines</sub>
-    <br />
-    <sub>• Batch processing & bulk operations</sub>
-    <br />
-    <sub>• Server & container deployments</sub>
-  </Card>
-</CardGroup>
+- Hardcoded API keys, tokens, or passwords in source files
+- New API endpoints without input validation
+- SQL queries built with string concatenation
+- Sensitive data logged to stdout
 
-## IDE Extensions
+If none of these issues are found, pass the check.
+```
 
-<Info>
-  **Complement your CLI workflow** - Rich editor integrations for interactive
-  development.
-</Info>
-
-<CardGroup cols={2}>
-  <Card
-    title="VS Code"
-    icon="code"
-    href="https://marketplace.visualstudio.com/items?itemName=Continue.continue"
-  >
-    Install from VS Code Marketplace
-    <br />
-    <sub>Real-time coding assistance and refactoring</sub>
-  </Card>
-  <Card
-    title="JetBrains"
-    icon="jet-fighter"
-    href="https://plugins.jetbrains.com/plugin/22707-continue-extension"
-  >
-    Install from JetBrains Plugin Repository
-    <br />
-    <sub>Autocomplete and multi-file edits</sub>
-  </Card>
-</CardGroup>
-
-## Core Features
-
-<CardGroup cols={2}>
-  <Card title="Agent" icon="robot" href="/ide-extensions/agent/quick-start">
-    Multi-step workflows and complex task automation
-  </Card>
-  <Card title="Chat" icon="messages" href="/ide-extensions/chat/quick-start">
-    Ask questions and explore your codebase
-  </Card>
-  <Card title="Edit" icon="pen-to-square" href="/ide-extensions/edit/quick-start">
-    In-place code editing without breaking flow
-  </Card>
-  <Card
-    title="Autocomplete"
-    icon="sparkles"
-    href="/ide-extensions/autocomplete/quick-start"
-  >
-    Inline AI suggestions as you type
-  </Card>
-</CardGroup>
-
-## Configuration
-
-<CardGroup cols={3}>
-  <Card title="Models" icon="brain" href="/customization/models">
-    Connect your preferred AI models
-  </Card>
-  <Card title="Rules" icon="shield" href="/customization/rules">
-    Configure AI behavior and constraints
-  </Card>
-  <Card title="MCPs" icon="wrench" href="/customization/mcp-tools">
-    Extend functionality with MCP tools
-  </Card>
-</CardGroup>
-
-## Resources
-
-<CardGroup cols={3}>
-  <Card title="Continue Hub" icon="globe" href="https://hub.continue.dev/">
-    Community models, rules, and tools
-  </Card>
-  <Card
-    title="GitHub Discussions"
-    icon="comments"
-    href="https://github.com/continuedev/continue/discussions"
-  >
-    Get help from the community
-  </Card>
-  <Card
-    title="CLI Examples"
-    icon="code-branch"
-    href="/guides/overview#continuous-ai"
-  >
-    TUI and headless workflow examples
-  </Card>
-</CardGroup>
+When a PR is opened, Continue runs each check against the diff and reports the result as a GitHub status check. If a check fails, it suggests a fix you can accept or reject directly from GitHub.

@@ -1,8 +1,11 @@
+import { ContinueError, ContinueErrorReason } from "core/util/errors.js";
+
 import {
   ApiRequestError,
   AuthenticationRequiredError,
   post,
 } from "../util/apiClient.js";
+import { updateAgentMetadata } from "../util/exit.js";
 import { logger } from "../util/logger.js";
 
 import { Tool } from "./types.js";
@@ -53,28 +56,52 @@ You should use this tool to notify the user whenever the state of your work chan
         const errorMessage =
           "Agent ID is required. Please use the --id flag with cn serve.";
         logger.error(errorMessage);
-        return `Error: ${errorMessage}`;
+        throw new ContinueError(ContinueErrorReason.Unspecified, errorMessage);
       }
 
       // Call the API endpoint using shared client
       await post(`agents/${agentId}/status`, { status: args.status });
 
       logger.info(`Status: ${args.status}`);
+
+      // If status is DONE or FAILED, mark agent as complete
+      const normalizedStatus = args.status.toUpperCase();
+      if (normalizedStatus === "DONE" || normalizedStatus === "FAILED") {
+        try {
+          await updateAgentMetadata({ isComplete: true });
+          logger.debug(
+            `Marked agent as complete due to status: ${args.status}`,
+          );
+        } catch (metadataErr) {
+          // Non-critical: log but don't fail the status update
+          logger.debug(
+            "Failed to update completion metadata (non-critical)",
+            metadataErr as any,
+          );
+        }
+      }
+
       return `Status set: ${args.status}`;
     } catch (error) {
+      if (error instanceof ContinueError) {
+        throw error;
+      }
+
       if (error instanceof AuthenticationRequiredError) {
         logger.error(error.message);
-        return "Error: Authentication required";
+        throw new Error("Error: Authentication required");
       }
 
       if (error instanceof ApiRequestError) {
-        return `Error setting status: ${error.status} ${error.response || error.statusText}`;
+        throw new Error(
+          `Error setting status: ${error.status} ${error.response || error.statusText}`,
+        );
       }
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       logger.error(`Error setting status: ${errorMessage}`);
-      return `Error setting status: ${errorMessage}`;
+      throw new Error(`Error setting status: ${errorMessage}`);
     }
   },
 };

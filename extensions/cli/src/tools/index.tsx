@@ -1,127 +1,150 @@
 // @ts-ignore
 import { ContinueError, ContinueErrorReason } from "core/util/errors.js";
+import { ChatCompletionTool } from "openai/resources.mjs";
 
 import { posthogService } from "src/telemetry/posthogService.js";
+import { isModelCapable } from "src/utils/modelCapability.js";
 
 import {
-  getServiceSync,
-  MCPServiceState,
   SERVICE_NAMES,
   serviceContainer,
   services,
 } from "../services/index.js";
-import type { ModelServiceState } from "../services/types.js";
+import type {
+  MCPServiceState,
+  MCPTool,
+  ModelServiceState,
+} from "../services/types.js";
 import { telemetryService } from "../telemetry/telemetryService.js";
 import { logger } from "../util/logger.js";
-import { isModelCapable } from "../utils/index.js";
 
+import { ALL_BUILT_IN_TOOLS } from "./allBuiltIns.js";
+import { askQuestionTool } from "./askQuestion.js";
+import { checkBackgroundJobTool } from "./checkBackgroundJob.js";
 import { editTool } from "./edit.js";
 import { exitTool } from "./exit.js";
 import { fetchTool } from "./fetch.js";
 import { listFilesTool } from "./listFiles.js";
 import { multiEditTool } from "./multiEdit.js";
 import { readFileTool } from "./readFile.js";
+import { reportFailureTool } from "./reportFailure.js";
 import { runTerminalCommandTool } from "./runTerminalCommand.js";
-import { searchCodeTool } from "./searchCode.js";
-import { statusTool } from "./status.js";
+import { checkIfRipgrepIsInstalled, searchCodeTool } from "./searchCode.js";
+import { skillsTool } from "./skills.js";
+import { subagentTool } from "./subagent.js";
+import {
+  isBetaSubagentToolEnabled,
+  isBetaUploadArtifactToolEnabled,
+} from "./toolsConfig.js";
 import {
   type Tool,
   type ToolCall,
   type ToolParametersSchema,
+  type ToolRunContext,
   ParameterSchema,
   PreprocessedToolCall,
 } from "./types.js";
+import { uploadArtifactTool } from "./uploadArtifact.js";
 import { writeChecklistTool } from "./writeChecklist.js";
 import { writeFileTool } from "./writeFile.js";
 
 export type { Tool, ToolCall, ToolParametersSchema };
 
+/**
+ * Extract the agent ID from the --id command line flag
+ */
+function getAgentIdFromArgs(): string | undefined {
+  const args = process.argv;
+  const idIndex = args.indexOf("--id");
+  if (idIndex !== -1 && idIndex + 1 < args.length) {
+    return args[idIndex + 1];
+  }
+  return undefined;
+}
+
 // Base tools that are always available
 const BASE_BUILTIN_TOOLS: Tool[] = [
   readFileTool,
-  editTool,
-  multiEditTool,
   writeFileTool,
-  // searchAndReplaceInFileTool,
   listFilesTool,
-  searchCodeTool,
   runTerminalCommandTool,
   fetchTool,
   writeChecklistTool,
+  checkBackgroundJobTool,
+  askQuestionTool,
 ];
 
-// Export BUILTIN_TOOLS as the base set of tools
-// Dynamic tools (like exit tool in headless mode) are added separately
-export const BUILTIN_TOOLS: Tool[] = BASE_BUILTIN_TOOLS;
-
-// Get dynamic tools based on current state
-function getDynamicTools(): Tool[] {
-  const dynamicTools: Tool[] = [];
-
-  if (services.toolPermissions.isHeadless()) {
-    dynamicTools.push(exitTool);
-  }
-
-  // Add beta status tool if --beta-status-tool flag is present
-  if (process.argv.includes("--beta-status-tool")) {
-    dynamicTools.push(statusTool);
-  }
-
-  return dynamicTools;
-}
-
-// Check if the current model is capable and should exclude Edit tool
-function shouldExcludeEditTool(): boolean {
-  try {
-    const modelServiceResult = getServiceSync<ModelServiceState>(
-      SERVICE_NAMES.MODEL,
-    );
-
-    if (
-      modelServiceResult.state === "ready" &&
-      modelServiceResult.value?.model
-    ) {
-      const { name, provider, model } = modelServiceResult.value.model;
-
-      // Check if model is capable
-      const isCapable = isModelCapable(provider, name, model);
-
-      logger.debug("Capability-based tool filtering", {
-        provider,
-        name,
-        isCapable,
-        willExcludeEdit: isCapable,
-      });
-
-      return isCapable;
-    }
-  } catch (error) {
-    logger.debug("Error checking model capability for tool filtering", {
-      error,
-    });
-  }
-  return false;
-}
+const BUILTIN_SEARCH_TOOLS: Tool[] = [searchCodeTool];
 
 // Get all builtin tools including dynamic ones, with capability-based filtering
-export function getAllBuiltinTools(): Tool[] {
-  let builtinTools = [...BUILTIN_TOOLS];
+export async function getAllAvailableTools(
+  isHeadless: boolean,
+): Promise<Tool[]> {
+  const tools = [...BASE_BUILTIN_TOOLS];
 
-  // Apply capability-based filtering for edit tools
+  const isRipgrepInstalled = await checkIfRipgrepIsInstalled();
+  if (isRipgrepInstalled) {
+    tools.push(...BUILTIN_SEARCH_TOOLS);
+  }
+
+  // Add agent-specific tools if agent ID is present
+  // (these require --id to function and will confuse the agent if unavailable)
+  const agentId = getAgentIdFromArgs();
+  if (agentId) {
+    tools.push(reportFailureTool);
+
+    // UploadArtifact tool is gated behind beta flag
+    if (isBetaUploadArtifactToolEnabled()) {
+      tools.push(uploadArtifactTool);
+    }
+  }
+
   // If model is capable, exclude editTool in favor of multiEditTool
-  if (shouldExcludeEditTool()) {
-    builtinTools = builtinTools.filter((tool) => tool.name !== editTool.name);
+  const modelState = await serviceContainer.get<ModelServiceState>(
+    SERVICE_NAMES.MODEL,
+  );
+  if (!modelState.model) {
+    throw new Error("Model service is not initialized");
+  }
+
+  const { provider, name, model } = modelState.model;
+
+  const isCapable = isModelCapable(provider, name, model);
+  if (isCapable) {
+    tools.push(multiEditTool);
+  } else {
+    tools.push(editTool);
     logger.debug(
       "Excluded Edit tool for capable model - MultiEdit will be used instead",
     );
   }
 
-  return [...builtinTools, ...getDynamicTools()];
+  logger.debug("Capability-based tool filtering", {
+    provider,
+    name,
+    isCapable,
+  });
+
+  if (isHeadless) {
+    tools.push(exitTool);
+  }
+
+  if (isBetaSubagentToolEnabled()) {
+    tools.push(await subagentTool());
+  }
+
+  tools.push(await skillsTool());
+
+  const mcpState = await serviceContainer.get<MCPServiceState>(
+    SERVICE_NAMES.MCP,
+  );
+  tools.push(...mcpState.tools.map(convertMcpToolToContinueTool));
+
+  return tools;
 }
 
 export function getToolDisplayName(toolName: string): string {
-  const allTools = getAllBuiltinTools();
-  const tool = allTools.find((t) => t.name === toolName);
+  const tool = ALL_BUILT_IN_TOOLS.find((t) => t.name === toolName);
   return tool?.displayName || toolName;
 }
 
@@ -150,39 +173,48 @@ export function extractToolCalls(
   return toolCalls;
 }
 
-export async function getAvailableTools() {
-  // Load MCP tools
-  const mcpState = await serviceContainer.get<MCPServiceState>(
-    SERVICE_NAMES.MCP,
-  );
-  const tools = mcpState.tools ?? [];
-  const mcpTools: Tool[] =
-    tools.map((t) => ({
-      name: t.name,
-      displayName: t.name.replace("mcp__", "").replace("ide__", ""),
-      description: t.description ?? "",
+export function convertToolToChatCompletionTool(
+  tool: Tool,
+): ChatCompletionTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
       parameters: {
         type: "object",
-        properties: (t.inputSchema.properties ?? {}) as Record<
-          string,
-          ParameterSchema
-        >,
-        required: t.inputSchema.required,
+        required: tool.parameters.required,
+        properties: tool.parameters.properties,
       },
-      readonly: undefined, // MCP tools don't have readonly property
-      isBuiltIn: false,
-      run: async (args: any) => {
-        const result = await mcpState.mcpService?.runTool(t.name, args);
-        return JSON.stringify(result?.content) ?? "";
-      },
-    })) || [];
+    },
+  };
+}
 
-  const allTools: Tool[] = [...getAllBuiltinTools(), ...mcpTools];
-  return allTools;
+export function convertMcpToolToContinueTool(mcpTool: MCPTool): Tool {
+  return {
+    name: mcpTool.name,
+    displayName: mcpTool.name,
+    description: mcpTool.description ?? "",
+    parameters: {
+      type: "object",
+      properties: (mcpTool.inputSchema.properties ?? {}) as Record<
+        string,
+        ParameterSchema
+      >,
+      required: mcpTool.inputSchema.required,
+    },
+    readonly: undefined, // MCP tools don't have readonly property
+    isBuiltIn: false,
+    run: async (args: any) => {
+      const result = await services.mcp?.runTool(mcpTool.name, args);
+      return JSON.stringify(result?.content) ?? "";
+    },
+  };
 }
 
 export async function executeToolCall(
   toolCall: PreprocessedToolCall,
+  options: { parallelToolCallCount: number } = { parallelToolCallCount: 1 },
 ): Promise<string> {
   const startTime = Date.now();
 
@@ -190,14 +222,27 @@ export async function executeToolCall(
     logger.debug("Executing tool", {
       toolName: toolCall.name,
       arguments: toolCall.arguments,
+      parallelToolCallCount: options.parallelToolCallCount,
     });
+
+    // Track edits if Git AI is enabled (no-op if not enabled)
+    await services.gitAiIntegration.trackToolUse(toolCall, "PreToolUse");
+
+    const context: ToolRunContext = {
+      toolCallId: toolCall.id,
+      parallelToolCallCount: options.parallelToolCallCount,
+    };
 
     // IMPORTANT: if preprocessed args are present, uses preprocessed args instead of original args
     // Preprocessed arg names may be different
     const result = await toolCall.tool.run(
       toolCall.preprocessResult?.args ?? toolCall.arguments,
+      context,
     );
     const duration = Date.now() - startTime;
+
+    // Track edits if Git AI is enabled (no-op if not enabled)
+    await services.gitAiIntegration.trackToolUse(toolCall, "PostToolUse");
 
     telemetryService.logToolResult({
       toolName: toolCall.name,
@@ -240,18 +285,17 @@ export async function executeToolCall(
       errorReason,
     });
 
-    return `Error executing tool "${toolCall.name}": ${errorMessage}`;
+    throw error;
   }
 }
 
 // Only checks top-level required
 export function validateToolCallArgsPresent(toolCall: ToolCall, tool: Tool) {
   const requiredParams = tool.parameters.required ?? [];
-  for (const [paramName] of Object.entries(tool.parameters)) {
+  for (const paramName of requiredParams) {
     if (
-      requiredParams.includes(paramName) &&
-      (toolCall.arguments[paramName] === undefined ||
-        toolCall.arguments[paramName] === null)
+      toolCall.arguments[paramName] === undefined ||
+      toolCall.arguments[paramName] === null
     ) {
       throw new Error(
         `Required parameter "${paramName}" missing for tool "${toolCall.name}"`,

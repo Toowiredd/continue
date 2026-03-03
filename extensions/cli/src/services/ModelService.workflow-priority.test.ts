@@ -23,6 +23,8 @@ vi.mock("../config.js", () => ({
 vi.mock("../util/logger.js", () => ({
   logger: {
     debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
     error: vi.fn(),
   },
 }));
@@ -60,8 +62,13 @@ describe("ModelService agent file model prioritization", () => {
         prompt: "Test agent",
       },
       slug: "test/agent",
-      agentFileModelName: "gpt-4",
-      agentFileService: null,
+      agentFileModel: {
+        name: "gpt-4",
+        model: "gpt-4",
+        provider: "openai",
+      },
+      parsedRules: null,
+      parsedTools: null,
     };
 
     // Mock createLlmApi to return different models based on the selected model
@@ -102,8 +109,9 @@ describe("ModelService agent file model prioritization", () => {
         // No model specified
       },
       slug: "test/agent",
-      agentFileModelName: null,
-      agentFileService: null,
+      agentFileModel: null,
+      parsedRules: null,
+      parsedTools: null,
     };
 
     // Mock getModelName to return a persisted model
@@ -146,8 +154,13 @@ describe("ModelService agent file model prioritization", () => {
         prompt: "Test agent",
       },
       slug: "test/agent",
-      agentFileModelName: "non-existent-model",
-      agentFileService: null,
+      agentFileModel: {
+        name: "non-existent-model",
+        model: "non-existent",
+        provider: "nonexistent",
+      },
+      parsedRules: null,
+      parsedTools: null,
     };
 
     const getLlmApiMock = vi.mocked(config.getLlmApi);
@@ -177,8 +190,9 @@ describe("ModelService agent file model prioritization", () => {
     const agentFileServiceState: AgentFileServiceState = {
       agentFile: null,
       slug: null,
-      agentFileModelName: null,
-      agentFileService: null,
+      agentFileModel: null,
+      parsedRules: null,
+      parsedTools: null,
     };
 
     // Make sure getModelName returns null (no persisted model)
@@ -215,8 +229,13 @@ describe("ModelService agent file model prioritization", () => {
         prompt: "Test agent",
       },
       slug: "test/agent",
-      agentFileModelName: "gpt-4",
-      agentFileService: null,
+      agentFileModel: {
+        name: "gpt-4",
+        model: "gpt-4",
+        provider: "openai",
+      },
+      parsedRules: null,
+      parsedTools: null,
     };
 
     // Mock getModelName to return a different persisted model

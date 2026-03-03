@@ -73,9 +73,9 @@ export function ConfigsSection() {
                                 error.fatal
                                   ? "text-error bg-error/10"
                                   : "bg-yellow-500/10 text-yellow-500"
-                              } rounded border border-solid border-transparent px-2 py-1 text-xs ${error.uri ? "cursor-pointer " + (error.fatal ? "hover:border-error" : "hover:border-yellow-500") : ""}`}
+                              } break-all rounded border border-solid border-transparent px-2 py-1 text-xs ${error.uri ? "cursor-pointer " + (error.fatal ? "hover:border-error" : "hover:border-yellow-500") : ""}`}
                             >
-                              {error.message}
+                              {error.message.split("\n")[0]}
                             </div>
                           ))}
                         </div>

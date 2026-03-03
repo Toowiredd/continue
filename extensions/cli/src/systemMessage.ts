@@ -2,14 +2,10 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-import pkg from "ignore-walk";
-import { Minimatch } from "minimatch";
-
 import { processRule } from "./hubLoader.js";
 import { PermissionMode } from "./permissions/types.js";
 import { serviceContainer } from "./services/ServiceContainer.js";
 import { ConfigServiceState, SERVICE_NAMES } from "./services/types.js";
-const { WalkerSync } = pkg;
 
 /**
  * Check if current directory is a git repository
@@ -20,39 +16,6 @@ function isGitRepo(): boolean {
     return true;
   } catch {
     return false;
-  }
-}
-
-/**
- * Get basic directory structure
- */
-function getDirectoryStructure(): string {
-  try {
-    const walker = new WalkerSync({
-      path: process.cwd(),
-      includeEmpty: false,
-      follow: false,
-      ignoreFiles: [".gitignore", ".continueignore", ".customignore"],
-    });
-
-    (walker.ignoreRules as any)[".customignore"] = [
-      new Minimatch(".git/*", {
-        matchBase: true,
-        dot: true,
-        flipNegate: true,
-        nocase: true,
-      }),
-    ];
-
-    const files = walker.start().result as string[];
-
-    const filteredFiles = files
-      .slice(0, 500)
-      .map((file: string) => `./${file}`);
-
-    return filteredFiles.join("\n") || "No structure available";
-  } catch {
-    return "Directory structure not available";
   }
 }
 
@@ -89,10 +52,6 @@ Today's date: ${new Date().toISOString().split("T")[0]}
 
 As you answer the user's questions, you can use the following context:
 
-<context name="directoryStructure">Below is a snapshot of this project's file structure at the start of the conversation. This snapshot will NOT update during the conversation. It skips over .gitignore patterns.
-
-${getDirectoryStructure()}
-</context>
 <context name="gitStatus">This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.
 
 ${getGitStatus()}
@@ -171,14 +130,16 @@ export async function constructSystemMessage(
   // Add plan mode specific instructions if in plan mode
   if (mode === "plan") {
     systemMessage +=
-      '\n<context name="planMode">You are operating in _Plan Mode_, which means that your goal is to help the user investigate their ideas and develop a plan before taking action. You only have access to read-only tools and should not attempt to circumvent them to write / delete / create files. For example, it is not acceptable to use the Bash tool to write to files.</context>\n';
+      '\n<context name="planMode">You are operating in _Plan Mode_, which means that your goal is to help the user investigate their ideas and develop a plan before taking action. You only have access to read-only tools and should not attempt to circumvent them to write / delete / create files. Ask the user to switch to agent mode if they want to make changes. For example, it is not acceptable to use the Bash tool to write to files.</context>\n';
   } else {
-    // TODO - make including this coauthor commit configurable
-    systemMessage += `\n<context name="commitSignature">When creating commits using any CLI or tool, include the following in the commit message:
+    // Check if commit signature is disabled via environment variable
+    if (!process.env.CONTINUE_CLI_DISABLE_COMMIT_SIGNATURE) {
+      systemMessage += `\n<context name="commitSignature">When creating commits using any CLI or tool, include the following in the commit message:
 Generated with [Continue](https://continue.dev)
 
 Co-Authored-By: Continue <noreply@continue.dev>
 </context>\n`;
+    }
   }
 
   // In headless mode, add instructions to be concise and only provide final answers

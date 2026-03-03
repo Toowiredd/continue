@@ -2,7 +2,11 @@ import {
   DataDestination,
   ModelRole,
   PromptTemplates,
+  ToolOverrideConfig,
 } from "@continuedev/config-yaml";
+import { ToolPolicy } from "@continuedev/terminal-security";
+import { McpUiResourceMeta } from "@modelcontextprotocol/ext-apps";
+import { TextResourceContents } from "@modelcontextprotocol/sdk/types.js";
 import Parser from "web-tree-sitter";
 import { CodebaseIndexer } from "./indexing/CodebaseIndexer";
 import { LLMConfigurationStatuses } from "./llm/constants";
@@ -267,11 +271,22 @@ export interface IContextProvider {
   get deprecationMessage(): string | null;
 }
 
+export interface SessionUsage extends Usage {
+  /** Total cumulative cost in USD for all LLM API calls in this session */
+  totalCost: number;
+}
+
 export interface Session {
   sessionId: string;
   title: string;
   workspaceDirectory: string;
   history: ChatHistoryItem[];
+  /** Optional: per-session UI mode (chat/agent/plan/background) */
+  mode?: MessageModes;
+  /** Optional: title of the selected chat model for this session */
+  chatModelTitle?: string | null;
+  /** Optional: cumulative usage and cost for all LLM API calls in this session */
+  usage?: SessionUsage;
 }
 
 export interface BaseSessionMetadata {
@@ -279,6 +294,7 @@ export interface BaseSessionMetadata {
   title: string;
   dateCreated: string;
   workspaceDirectory: string;
+  messageCount?: number;
 }
 
 export interface RangeInFile {
@@ -359,11 +375,15 @@ export interface ToolResultChatMessage {
   role: "tool";
   content: string;
   toolCallId: string;
+  /** Arbitrary per-message metadata (IDs, provider-specific info, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 export interface UserChatMessage {
   role: "user";
   content: MessageContent;
+  /** Arbitrary per-message metadata (IDs, provider-specific info, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ThinkingChatMessage {
@@ -372,6 +392,12 @@ export interface ThinkingChatMessage {
   signature?: string;
   redactedThinking?: string;
   toolCalls?: ToolCallDelta[];
+  reasoning_details?: {
+    signature?: string;
+    [key: string]: any;
+  }[];
+  /** Arbitrary per-message metadata (IDs, provider-specific info, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -400,11 +426,15 @@ export interface AssistantChatMessage {
   content: MessageContent;
   toolCalls?: ToolCallDelta[];
   usage?: Usage;
+  /** Arbitrary per-message metadata (IDs, provider-specific info, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 export interface SystemChatMessage {
   role: "system";
   content: string;
+  /** Arbitrary per-message metadata (IDs, provider-specific info, etc.) */
+  metadata?: Record<string, unknown>;
 }
 
 export type ChatMessage =
@@ -462,7 +492,7 @@ export interface PromptLog {
   completion: string;
 }
 
-export type MessageModes = "chat" | "agent" | "plan";
+export type MessageModes = "chat" | "agent" | "plan" | "background";
 
 export type ToolStatus =
   | "generating" // Tool call arguments are being streamed from the LLM
@@ -471,6 +501,16 @@ export type ToolStatus =
   | "errored" // Tool execution failed with an error
   | "done" // Tool execution completed successfully
   | "canceled"; // Tool call was canceled by user or system
+
+interface McpUiResourceContents extends TextResourceContents {
+  _meta?: {
+    ui?: McpUiResourceMeta;
+  };
+}
+
+interface McpUiState {
+  content: McpUiResourceContents;
+}
 
 // Will exist only on "assistant" messages with tool calls
 interface ToolCallState {
@@ -481,6 +521,7 @@ interface ToolCallState {
   processedArgs?: Record<string, any>; // Added in preprocesing step
   output?: ContextItem[];
   tool?: Tool;
+  mcpUiState?: McpUiState;
 }
 
 interface Reasoning {
@@ -499,7 +540,7 @@ export interface ChatHistoryItem {
   toolCallStates?: ToolCallState[];
   isGatheringContext?: boolean;
   reasoning?: Reasoning;
-  appliedRules?: RuleWithSource[];
+  appliedRules?: RuleMetadata[];
   conversationSummary?: string;
 }
 
@@ -669,6 +710,9 @@ export interface LLMOptions {
 
   sourceFile?: string;
   isFromAutoDetect?: boolean;
+
+  /** Tool overrides for this model */
+  toolOverrides?: ToolOverride[];
 }
 
 type RequireAtLeastOne<T, Keys extends keyof T = keyof T> = Pick<
@@ -815,6 +859,8 @@ export interface IDE {
   fileExists(fileUri: string): Promise<boolean>;
 
   writeFile(path: string, contents: string): Promise<void>;
+
+  removeFile(path: string): Promise<void>;
 
   showVirtualFile(title: string, contents: string): Promise<void>;
 
@@ -1077,6 +1123,13 @@ export interface ToolExtras {
   codeBaseIndexer?: CodebaseIndexer;
 }
 
+export interface McpToolMeta {
+  ui?: {
+    resourceUri?: string;
+  };
+  "ui/resourceUri"?: string;
+}
+
 export interface Tool {
   type: "function";
   function: {
@@ -1110,8 +1163,19 @@ export interface Tool {
   evaluateToolCallPolicy?: (
     basePolicy: ToolPolicy,
     parsedArgs: Record<string, unknown>,
+    processedArgs?: Record<string, unknown>,
   ) => ToolPolicy;
+  mcpMeta?: McpToolMeta;
 }
+
+/**
+ * Configuration for overriding built-in tool prompts.
+ * Extends ToolOverrideConfig with required name for array usage.
+ */
+export type ToolOverride = ToolOverrideConfig & {
+  /** Tool name to override (matches function.name, e.g., "read_file") */
+  name: string;
+};
 
 interface ToolChoice {
   type: "function";
@@ -1126,9 +1190,10 @@ export interface ConfigDependentToolParams {
   isSignedIn: boolean;
   isRemote: boolean;
   modelName: string | undefined;
+  ide: IDE;
 }
 
-export type GetTool = (params: ConfigDependentToolParams) => Tool;
+export type GetTool = (params: ConfigDependentToolParams) => Promise<Tool>;
 
 export interface BaseCompletionOptions {
   temperature?: number;
@@ -1328,6 +1393,7 @@ export interface MCPTool {
     type: "object";
     properties?: Record<string, any>;
   };
+  _meta?: Record<string, unknown> | undefined;
 }
 
 type BaseInternalMCPOptions = {
@@ -1389,7 +1455,6 @@ export interface ContinueUIConfig {
   showChatScrollbar?: boolean;
   codeWrap?: boolean;
   showSessionTabs?: boolean;
-  autoAcceptEditToolDiffs?: boolean;
   continueAfterToolRejection?: boolean;
 }
 
@@ -1492,6 +1557,7 @@ export interface RangeInFileWithNextEditInfo {
   filepath: string;
   range: Range;
   fileContents: string;
+  fileContentsBefore: string;
   editText: string;
   afterCursorPos: Position;
   beforeCursorPos: Position;
@@ -1789,7 +1855,7 @@ export interface BrowserSerializedContinueConfig {
   experimental?: ExperimentalConfig;
   analytics?: AnalyticsConfig;
   docs?: SiteIndexingConfig[];
-  tools: Omit<Tool, "preprocessArgs", "evaluatePolicy">[];
+  tools: Omit<Tool, "preprocessArgs", "evaluateToolCallPolicy">[];
   mcpServerStatuses: MCPServerStatus[];
   rules: RuleWithSource[];
   usePlatform: boolean;
@@ -1854,18 +1920,30 @@ export type RuleSource =
   | ".continuerules"
   | "agentFile";
 
-export interface RuleWithSource {
+export interface RuleMetadata {
   name?: string;
   slug?: string;
   source: RuleSource;
   globs?: string | string[];
   regex?: string | string[];
-  rule: string;
   description?: string;
   sourceFile?: string;
   alwaysApply?: boolean;
   invokable?: boolean;
 }
+export interface RuleWithSource extends RuleMetadata {
+  rule: string;
+}
+
+export interface Skill {
+  name: string;
+  description: string;
+  path: string;
+  content: string;
+  files: string[];
+  license?: string;
+}
+
 export interface CompleteOnboardingPayload {
   mode: OnboardingModes;
   provider?: string;

@@ -1,15 +1,23 @@
 import { loadAuthConfig } from "../auth/workos.js";
 import { initializeWithOnboarding } from "../onboarding.js";
+import {
+  setBetaSubagentToolEnabled,
+  setBetaUploadArtifactToolEnabled,
+} from "../tools/toolsConfig.js";
 import { logger } from "../util/logger.js";
 
 import { AgentFileService } from "./AgentFileService.js";
 import { ApiClientService } from "./ApiClientService.js";
+import { ArtifactUploadService } from "./ArtifactUploadService.js";
 import { AuthService } from "./AuthService.js";
+import { backgroundJobService } from "./BackgroundJobService.js";
 import { ChatHistoryService } from "./ChatHistoryService.js";
 import { ConfigService } from "./ConfigService.js";
 import { FileIndexService } from "./FileIndexService.js";
+import { GitAiIntegrationService } from "./GitAiIntegrationService.js";
 import { MCPService } from "./MCPService.js";
 import { ModelService } from "./ModelService.js";
+import { quizService } from "./QuizService.js";
 import { ResourceMonitoringService } from "./ResourceMonitoringService.js";
 import { serviceContainer } from "./ServiceContainer.js";
 import { StorageSyncService } from "./StorageSyncService.js";
@@ -23,6 +31,7 @@ import {
   ApiClientServiceState,
   AuthServiceState,
   ConfigServiceState,
+  MCPServiceState,
   SERVICE_NAMES,
   ServiceInitOptions,
 } from "./types.js";
@@ -42,6 +51,8 @@ const storageSyncService = new StorageSyncService();
 const agentFileService = new AgentFileService();
 const toolPermissionService = new ToolPermissionService();
 const systemMessageService = new SystemMessageService();
+const artifactUploadService = new ArtifactUploadService();
+const gitAiIntegrationService = new GitAiIntegrationService();
 
 /**
  * Initialize all services and register them with the service container
@@ -52,6 +63,13 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
 
   const commandOptions = initOptions.options || {};
 
+  // Configure beta tools based on command options
+  if (commandOptions.betaUploadArtifactTool) {
+    setBetaUploadArtifactToolEnabled(true);
+  }
+  if (commandOptions.betaSubagentTool) {
+    setBetaSubagentToolEnabled(true);
+  }
   // Handle onboarding for TUI mode (headless: false) unless explicitly skipped
   if (!initOptions.headless && !initOptions.skipOnboarding) {
     const authConfig = loadAuthConfig();
@@ -76,17 +94,48 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
   }
 
   serviceContainer.register(
+    SERVICE_NAMES.AUTH,
+    async () => {
+      return await authService.initialize();
+    },
+    [], // No dependencies
+  );
+
+  serviceContainer.register(
+    SERVICE_NAMES.API_CLIENT,
+    async () => {
+      const authState = await serviceContainer.get<AuthServiceState>(
+        SERVICE_NAMES.AUTH,
+      );
+      return apiClientService.initialize(authState.authConfig);
+    },
+    [SERVICE_NAMES.AUTH], // Depends on auth
+  );
+
+  serviceContainer.register(
     SERVICE_NAMES.AGENT_FILE,
-    () => agentFileService.initialize(commandOptions.agent),
-    [],
+    async () => {
+      const [authState, apiClientState] = await Promise.all([
+        serviceContainer.get<AuthServiceState>(SERVICE_NAMES.AUTH),
+        serviceContainer.get<ApiClientServiceState>(SERVICE_NAMES.API_CLIENT),
+      ]);
+
+      return await agentFileService.initialize(
+        commandOptions.agent,
+        authState,
+        apiClientState,
+      );
+    },
+    [SERVICE_NAMES.AUTH, SERVICE_NAMES.API_CLIENT],
   );
 
   serviceContainer.register(
     SERVICE_NAMES.TOOL_PERMISSIONS,
     async () => {
-      const agentFileState = await serviceContainer.get<AgentFileServiceState>(
-        SERVICE_NAMES.AGENT_FILE,
-      );
+      const [mcpState, agentFileState] = await Promise.all([
+        serviceContainer.get<MCPServiceState>(SERVICE_NAMES.MCP),
+        serviceContainer.get<AgentFileServiceState>(SERVICE_NAMES.AGENT_FILE),
+      ]);
 
       // Initialize mode service with tool permission overrides
       if (initOptions.toolPermissionOverrides) {
@@ -99,13 +148,16 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
           exclude: overrides.exclude,
           isHeadless: initOptions.headless,
         };
-
         // Only set the boolean flag that corresponds to the mode
         if (overrides.mode) {
           initArgs.mode = overrides.mode;
         }
         // If mode is "normal" or undefined, no flags are set
-        return await toolPermissionService.initialize(initArgs, agentFileState);
+        return await toolPermissionService.initialize(
+          initArgs,
+          agentFileState,
+          mcpState,
+        );
       } else {
         // Even if no overrides, we need to initialize with defaults
         return await toolPermissionService.initialize(
@@ -113,10 +165,11 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
             isHeadless: initOptions.headless,
           },
           agentFileState,
+          mcpState,
         );
       }
     },
-    [SERVICE_NAMES.AGENT_FILE],
+    [SERVICE_NAMES.AGENT_FILE, SERVICE_NAMES.MCP],
   );
 
   // Initialize SystemMessageService with command options
@@ -132,26 +185,9 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
   );
 
   serviceContainer.register(
-    SERVICE_NAMES.AUTH,
-    () => authService.initialize(),
-    [], // No dependencies
-  );
-
-  serviceContainer.register(
     SERVICE_NAMES.UPDATE,
     () => updateService.initialize(),
     [], // No dependencies
-  );
-
-  serviceContainer.register(
-    SERVICE_NAMES.API_CLIENT,
-    async () => {
-      const authState = await serviceContainer.get<AuthServiceState>(
-        SERVICE_NAMES.AUTH,
-      );
-      return apiClientService.initialize(authState.authConfig);
-    },
-    [SERVICE_NAMES.AUTH], // Depends on auth
   );
 
   serviceContainer.register(
@@ -200,13 +236,14 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
         }
       }
 
-      return configService.initialize({
+      return await configService.initialize({
         authConfig: finalAuthState.authConfig,
         configPath,
         // organizationId: finalAuthState.organizationId || null,
         apiClient: apiClientState.apiClient,
         agentFileState,
         injectedConfigOptions: commandOptions,
+        isHeadless: initOptions.headless,
       });
     },
     [SERVICE_NAMES.AUTH, SERVICE_NAMES.API_CLIENT, SERVICE_NAMES.AGENT_FILE], // Dependencies
@@ -244,7 +281,11 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
       if (!configState.config) {
         throw new Error("Config not available for MCP service");
       }
-      return mcpService.initialize(configState.config, initOptions.headless);
+      return mcpService.initialize(
+        configState.config,
+        !!initOptions.options?.agent,
+        initOptions.headless,
+      );
     },
     [SERVICE_NAMES.CONFIG], // Depends on config
   );
@@ -268,9 +309,27 @@ export async function initializeServices(initOptions: ServiceInitOptions = {}) {
   );
 
   serviceContainer.register(
+    SERVICE_NAMES.ARTIFACT_UPLOAD,
+    () => artifactUploadService.initialize(),
+    [],
+  );
+
+  serviceContainer.register(
     SERVICE_NAMES.CHAT_HISTORY,
     () => chatHistoryService.initialize(undefined, initOptions.headless),
     [], // No dependencies for now, but could depend on SESSION in future
+  );
+
+  serviceContainer.register(
+    SERVICE_NAMES.GIT_AI_INTEGRATION,
+    () => gitAiIntegrationService.initialize(),
+    [], // No dependencies
+  );
+
+  serviceContainer.register(
+    SERVICE_NAMES.QUIZ,
+    () => quizService.initialize(),
+    [], // No dependencies
   );
 
   // Eagerly initialize all services to ensure they're ready when needed
@@ -334,7 +393,13 @@ export const services = {
   storageSync: storageSyncService,
   agentFile: agentFileService,
   toolPermissions: toolPermissionService,
+  artifactUpload: artifactUploadService,
+  gitAiIntegration: gitAiIntegrationService,
+  backgroundJobs: backgroundJobService,
+  quiz: quizService,
 } as const;
+
+export type ServicesType = typeof services;
 
 // Export the service container for advanced usage
 export { serviceContainer };

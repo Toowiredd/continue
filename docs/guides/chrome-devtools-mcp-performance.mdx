@@ -4,6 +4,11 @@ description: "Measure and optimize web performance with Chrome DevTools MCP, aut
 sidebarTitle: "Chrome DevTools MCP for Performance"
 ---
 
+import { OSAutoDetect } from '/snippets/OSAutoDetect.jsx'
+import CLIInstall from '/snippets/cli-install.mdx'
+
+<OSAutoDetect />
+
 <Card title="Debug Performance Like a Pro" icon="gauge-high">
   Use AI to automatically trace performance, analyze Core Web Vitals, diagnose bottlenecks, and get actionable optimization suggestions directly from Chrome DevTools
 </Card>
@@ -36,17 +41,15 @@ This cookbook teaches you to:
 - Chrome browser installed
 - Web project with a running development server (or deployed URL)
 - Node.js 20+ installed
-- [Continue CLI](https://docs.continue.dev/guides/cli) (`npm i -g @continuedev/cli`)
-- [Chrome DevTools MCP](https://hub.continue.dev) configured
+- [Continue CLI](https://docs.continue.dev/guides/cli)
+- [Chrome DevTools MCP](https://continue.dev) configured
 
 ## Quick Setup
 
 For all options, first:
 <Steps>
 <Step title="Install Continue CLI">
-    ```bash
-    npm i -g @continuedev/cli
-    ```
+    <CLIInstall />
   </Step>
 </Steps>
 
@@ -65,16 +68,16 @@ After completing **Quick Setup** above, you have two paths to get started:
 
     <Steps>
       <Step title="Add the Pre-Built Agent">
-        Visit the [Chrome DevTools Continuous Agent](https://hub.continue.dev/continuedev/chrome-dev-continuous) on Continue Hub and click **"Install Agent"** or run:
+        Visit the [Chrome Dev Tools Agent](https://continue.dev/continuedev/chrome-dev-tools-agent) on Continue Mission Control and click **"Install Agent"** or run:
         
         ```bash
-        cn --config continuedev/chrome-dev-continuous
+        cn --agent continuedev/chrome-dev-tools-agent
         ```
 
         This agent includes:
         - **Optimized prompts** for performance analysis and debugging
         - **Built-in rules** for consistent formatting and error handling
-        - **[Chrome DevTools MCP](https://hub.continue.dev/google/chrome-devtools-mcp)** for reliable browser automation
+        - **[Chrome DevTools MCP](https://continue.dev/google/chrome-devtools-mcp)** for reliable browser automation
       </Step>
 
       <Step title="Run Performance Analysis">
@@ -96,7 +99,7 @@ After completing **Quick Setup** above, you have two paths to get started:
   <Tab title="🛠️ Manual Setup">
     <Steps>
       <Step title="Add Chrome DevTools MCP to Your Assistant">
-        Visit the [Chrome DevTools MCP](https://hub.continue.dev/google/chrome-devtools-mcp) on Continue Hub and add it to your assistant, or add this to your configuration:
+        Visit the [Chrome DevTools MCP](https://continue.dev/google/chrome-devtools-mcp) on Continue Mission Control and add it to your assistant, or add this to your configuration:
 
         ```yaml
         name: Chrome DevTools MCP
@@ -140,7 +143,7 @@ After completing **Quick Setup** above, you have two paths to get started:
 <Accordion title="Agent Requirements">
     To use the pre-built agent, you need either:
       - **Continue CLI Pro Plan** with the models add-on, OR
-      - **Your own API keys** added to Continue Hub secrets
+      - **Your own API keys** added to Continue Mission Control secrets
       - **Chrome browser** installed on your system
       - **Node.js 20+** to run the MCP via npx
 
@@ -398,7 +401,7 @@ This example demonstrates a **Continuous AI workflow** where performance validat
 
 Navigate to **Repository Settings → Secrets and variables → Actions** and add:
 
-- `CONTINUE_API_KEY`: Your Continue API key from [hub.continue.dev/settings/api-keys](https://hub.continue.dev/settings/api-keys)
+- `CONTINUE_API_KEY`: Your Continue API key from [continue.dev/settings/api-keys](https://continue.dev/settings/api-keys)
 
 ### Create Workflow File
 
@@ -438,7 +441,7 @@ jobs:
         env:
           CONTINUE_API_KEY: ${{ secrets.CONTINUE_API_KEY }}
         run: |
-          cn --config continuedev/chrome-dev-continuous \
+          cn --agent continuedev/chrome-dev-tools-agent \
              -p "Navigate to http://localhost:3000 and:
              1. Record performance trace with reload
              2. Extract LCP, FID, CLS values
@@ -786,7 +789,7 @@ Set up automated regression detection:
   <Card title="Chrome DevTools MCP" icon="plug" href="https://github.com/ChromeDevTools/chrome-devtools-mcp">
     Official Chrome DevTools MCP repository
   </Card>
-  <Card title="Continue Hub" icon="circle-nodes" href="https://hub.continue.dev">
+  <Card title="Continue Mission Control" icon="circle-nodes" href="https://continue.dev">
     Explore more MCP integrations
   </Card>
   <Card title="DevTools Documentation" icon="book" href="https://developer.chrome.com/docs/devtools">

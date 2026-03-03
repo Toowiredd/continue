@@ -41,7 +41,7 @@ export class ModelService
   async doInitialize(
     assistant: AssistantUnrolled,
     authConfig: AuthConfig,
-    agentFileServiceState?: AgentFileServiceState,
+    agentFileServiceState: AgentFileServiceState | undefined,
   ): Promise<ModelServiceState> {
     logger.debug("ModelService.doInitialize called", {
       hasAssistant: !!assistant,
@@ -60,12 +60,13 @@ export class ModelService
     let modelSource = "default";
 
     // Priority = agentFile -> last selected model
-    if (agentFileServiceState?.agentFileModelName) {
-      preferredModelName = agentFileServiceState.agentFileModelName;
+    if (agentFileServiceState?.agentFileModel?.name) {
+      preferredModelName = agentFileServiceState.agentFileModel?.name;
       modelSource = "agentFile";
     } else {
-      preferredModelName = getModelName(authConfig);
-      if (preferredModelName) {
+      const persistedName = getModelName(authConfig);
+      if (persistedName) {
+        preferredModelName = persistedName;
         modelSource = "persisted";
       }
     }
@@ -119,48 +120,6 @@ export class ModelService
         assistant,
         authConfig,
       };
-    }
-  }
-
-  /**
-   * Update the model based on new config or auth changes
-   */
-  async update(
-    assistant: AssistantUnrolled,
-    authConfig: AuthConfig,
-  ): Promise<ModelServiceState> {
-    logger.debug("Updating ModelService");
-
-    try {
-      // Update instance properties for backward compatibility
-      this.assistant = assistant;
-      this.authConfig = authConfig;
-      this.availableModels = (assistant.models?.filter(
-        (model) =>
-          model && (model.roles?.includes("chat") || model.roles === undefined),
-      ) || []) as ModelConfig[];
-
-      const [llmApi, model] = getLlmApi(assistant, authConfig);
-
-      // Ensure state has all necessary data
-      this.setState({
-        llmApi,
-        model,
-        assistant,
-        authConfig,
-      });
-
-      logger.debug("ModelService updated successfully", {
-        modelProvider: model.provider,
-        modelName: (model as any).name || "unnamed",
-        availableModels: this.availableModels.length,
-      });
-
-      return this.getState();
-    } catch (error: any) {
-      logger.error("Failed to update ModelService:", error);
-      this.emit("error", error);
-      throw error;
     }
   }
 
@@ -345,5 +304,26 @@ export class ModelService
 
       return nameMatches;
     });
+  }
+
+  static getSubagentModels(modelState: ModelServiceState) {
+    if (!modelState.assistant) {
+      return [];
+    }
+    const subagentModels = modelState.assistant.models
+      ?.filter((model) => !!model)
+      .filter((model) => !!model.name) // filter out models without a name
+      .filter((model) => model.roles?.includes("subagent")) // filter with role subagent
+      .filter((model) => !!model.chatOptions?.baseSystemMessage); // filter those with a system message
+
+    if (!subagentModels) {
+      return [];
+    }
+    return subagentModels?.map((model) => ({
+      llmApi: createLlmApi(model, modelState.authConfig),
+      model,
+      assistant: modelState.assistant,
+      authConfig: modelState.authConfig,
+    }));
   }
 }

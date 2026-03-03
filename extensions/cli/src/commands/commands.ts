@@ -6,6 +6,7 @@ export { login } from "./login.js";
 export { logout } from "./logout.js";
 export { listSessionsCommand } from "./ls.js";
 export { remote } from "./remote.js";
+export { review } from "./review.js";
 export { serve } from "./serve.js";
 
 export interface SlashCommand {
@@ -98,6 +99,11 @@ export const SYSTEM_SLASH_COMMANDS: SystemCommand[] = [
   {
     name: "exit",
     description: "Exit the chat",
+    category: "system",
+  },
+  {
+    name: "jobs",
+    description: "List background jobs",
     category: "system",
   },
 ];

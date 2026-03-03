@@ -70,6 +70,7 @@ import {
 import { MCPManagerSingleton } from "./context/mcp/MCPManagerSingleton";
 import { performAuth, removeMCPAuth } from "./context/mcp/MCPOauth";
 import { setMdmLicenseKey } from "./control-plane/mdm/mdm";
+import { myersDiff } from "./diff/myers";
 import { ApplyAbortManager } from "./edit/applyAbortManager";
 import { streamDiffLines } from "./edit/streamDiffLines";
 import { shouldIgnore } from "./indexing/shouldIgnore";
@@ -408,7 +409,12 @@ export class Core {
     });
 
     on("config/addLocalWorkspaceBlock", async (msg) => {
-      await createNewWorkspaceBlockFile(this.ide, msg.data.blockType);
+      await createNewWorkspaceBlockFile(
+        this.ide,
+        msg.data.blockType,
+        msg.data.baseFilename,
+      );
+      walkDirCache.invalidate();
       await this.configHandler.reloadConfig(
         "Local block created (config/addLocalWorkspaceBlock message)",
       );
@@ -416,11 +422,35 @@ export class Core {
 
     on("config/addGlobalRule", async (msg) => {
       try {
-        await createNewGlobalRuleFile(this.ide);
+        await createNewGlobalRuleFile(this.ide, msg.data?.baseFilename);
+        walkDirCache.invalidate();
         await this.configHandler.reloadConfig(
           "Global rule created (config/addGlobalRule message)",
         );
       } catch (error) {
+        throw error;
+      }
+    });
+
+    on("config/deleteRule", async (msg) => {
+      try {
+        const filepath = msg.data.filepath;
+        if (
+          !isColocatedRulesFile(filepath) &&
+          !isContinueConfigRelatedUri(filepath)
+        ) {
+          throw new Error("Only rule files can be deleted");
+        }
+        const fileExists = await this.ide.fileExists(filepath);
+        if (fileExists) {
+          await this.ide.removeFile(filepath);
+          walkDirCache.invalidate();
+          await this.configHandler.reloadConfig(
+            "Rule file deleted (config/deleteRule message)",
+          );
+        }
+      } catch (error) {
+        console.error("Failed to delete rule file:", error);
         throw error;
       }
     });
@@ -472,9 +502,11 @@ export class Core {
       const urlPath = msg.data.path.startsWith("/")
         ? msg.data.path.slice(1)
         : msg.data.path;
-      let url = `${env.APP_URL}${urlPath}`;
+      let url;
       if (msg.data.orgSlug) {
-        url += `?org=${msg.data.orgSlug}`;
+        url = `${env.APP_URL}organizations/${msg.data.orgSlug}/${urlPath}`;
+      } else {
+        url = `${env.APP_URL}${urlPath}`;
       }
       await this.messenger.request("openUrl", url);
     });
@@ -794,6 +826,10 @@ export class Core {
       );
     });
 
+    on("getDiffLines", (msg) => {
+      return myersDiff(msg.data.oldContent, msg.data.newContent);
+    });
+
     on("cancelApply", async (msg) => {
       const abortManager = ApplyAbortManager.getInstance();
       abortManager.clear(); // for now abort all streams
@@ -1091,7 +1127,7 @@ export class Core {
 
     on(
       "tools/evaluatePolicy",
-      async ({ data: { toolName, basePolicy, args } }) => {
+      async ({ data: { toolName, basePolicy, parsedArgs, processedArgs } }) => {
         const { config } = await this.configHandler.loadConfig();
         if (!config) {
           throw new Error("Config not loaded");
@@ -1104,12 +1140,16 @@ export class Core {
 
         // Extract display value for specific tools
         let displayValue: string | undefined;
-        if (toolName === "runTerminalCommand" && args.command) {
-          displayValue = args.command as string;
+        if (toolName === "runTerminalCommand" && parsedArgs.command) {
+          displayValue = parsedArgs.command as string;
         }
 
         if (tool.evaluateToolCallPolicy) {
-          const evaluatedPolicy = tool.evaluateToolCallPolicy(basePolicy, args);
+          const evaluatedPolicy = tool.evaluateToolCallPolicy(
+            basePolicy,
+            parsedArgs,
+            processedArgs,
+          );
           return { policy: evaluatedPolicy, displayValue };
         }
         return { policy: basePolicy, displayValue };

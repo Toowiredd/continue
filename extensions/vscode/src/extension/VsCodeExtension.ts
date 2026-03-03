@@ -44,13 +44,10 @@ import { VsCodeIde } from "../VsCodeIde";
 import { ConfigYamlDocumentLinkProvider } from "./ConfigYamlDocumentLinkProvider";
 import { VsCodeMessenger } from "./VsCodeMessenger";
 
-import { getAst } from "core/autocomplete/util/ast";
 import { modelSupportsNextEdit } from "core/llm/autodetect";
 import { NEXT_EDIT_MODELS } from "core/llm/constants";
-import { DocumentHistoryTracker } from "core/nextEdit/DocumentHistoryTracker";
 import { NextEditProvider } from "core/nextEdit/NextEditProvider";
 import { isNextEditTest } from "core/nextEdit/utils";
-import { localPathOrUriToPath } from "core/util/pathToUri";
 import { JumpManager } from "../activation/JumpManager";
 import setupNextEditWindowManager, {
   NextEditWindowManager,
@@ -61,7 +58,11 @@ import {
 } from "../activation/SelectionChangeManager";
 import { GhostTextAcceptanceTracker } from "../autocomplete/GhostTextAcceptanceTracker";
 import { getDefinitionsFromLsp } from "../autocomplete/lsp";
-import { handleTextDocumentChange } from "../util/editLoggingUtils";
+import {
+  clearDocumentContentCache,
+  handleTextDocumentChange,
+  initDocumentContentCache,
+} from "../util/editLoggingUtils";
 import type { VsCodeWebviewProtocol } from "../webviewProtocol";
 
 export class VsCodeExtension {
@@ -479,6 +480,16 @@ export class VsCodeExtension {
       });
     }
 
+    // Initialize document content cache for tracking pre-edit content
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      initDocumentContentCache(document);
+    });
+
+    // Initialize cache for all currently open documents
+    for (const document of vscode.workspace.textDocuments) {
+      initDocumentContentCache(document);
+    }
+
     vscode.workspace.onDidChangeTextDocument(async (event) => {
       if (event.contentChanges.length > 0) {
         selectionManager.documentChanged();
@@ -508,6 +519,7 @@ export class VsCodeExtension {
     });
 
     vscode.workspace.onDidCloseTextDocument(async (event) => {
+      clearDocumentContentCache(event.uri.toString());
       this.core.invoke("files/closed", {
         uris: [event.uri.toString()],
       });
@@ -534,16 +546,17 @@ export class VsCodeExtension {
       });
     });
 
-    vscode.workspace.onDidOpenTextDocument(async (event) => {
-      const ast = await getAst(event.fileName, event.getText());
-      if (ast) {
-        DocumentHistoryTracker.getInstance().addDocument(
-          localPathOrUriToPath(event.fileName),
-          event.getText(),
-          ast,
-        );
-      }
-    });
+    // TODO merge this and re-enable https://github.com/continuedev/continue/pull/8364
+    // vscode.workspace.onDidOpenTextDocument(async (event) => {
+    //   const ast = await getAst(event.fileName, event.getText());
+    //   if (ast) {
+    //     DocumentHistoryTracker.getInstance().addDocument(
+    //       localPathOrUriToPath(event.fileName),
+    //       event.getText(),
+    //       ast,
+    //     );
+    //   }
+    // });
 
     // When GitHub sign-in status changes, reload config
     vscode.authentication.onDidChangeSessions(async (e) => {

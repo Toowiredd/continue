@@ -1,7 +1,23 @@
 import type { ContextItem } from "core/index.js";
 import { fetchUrlContentImpl } from "core/tools/implementations/fetchUrlContent.js";
+import { ContinueError, ContinueErrorReason } from "core/util/errors.js";
+
+import {
+  parseEnvNumber,
+  truncateOutputFromEnd,
+} from "../util/truncateOutput.js";
 
 import { Tool } from "./types.js";
+
+// Output truncation defaults
+const DEFAULT_FETCH_MAX_CHARS = 20000;
+
+function getFetchMaxChars(): number {
+  return parseEnvNumber(
+    process.env.CONTINUE_CLI_FETCH_MAX_OUTPUT_LENGTH,
+    DEFAULT_FETCH_MAX_CHARS,
+  );
+}
 
 export const fetchTool: Tool = {
   name: "Fetch",
@@ -46,20 +62,34 @@ export const fetchTool: Tool = {
       console.error = originalConsoleError;
 
       if (contextItems.length === 0) {
-        return `Error: Could not fetch content from ${url}`;
+        throw new ContinueError(
+          ContinueErrorReason.Unspecified,
+          `Could not fetch content from ${url}`,
+        );
       }
 
       // Format the results for CLI display
-      return contextItems
-        .map((item: ContextItem) => {
-          if (item.name === "Truncation warning") {
-            return item.content;
-          }
-          return item.content;
-        })
+      const combinedContent = contextItems
+        .filter((item: ContextItem) => item.name !== "Truncation warning")
+        .map((item: ContextItem) => item.content)
         .join("\n\n");
+
+      // Apply CLI-level truncation
+      const maxChars = getFetchMaxChars();
+      const { output: truncatedOutput } = truncateOutputFromEnd(
+        combinedContent,
+        maxChars,
+        "fetched content",
+      );
+
+      return truncatedOutput;
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      if (error instanceof ContinueError) {
+        throw error;
+      }
+      throw new Error(
+        `Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   },
 };

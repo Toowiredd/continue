@@ -48,7 +48,7 @@ describe("fetchTool", () => {
     );
   });
 
-  it("should handle truncation warnings from core implementation", async () => {
+  it("should filter out truncation warnings from core implementation", async () => {
     const mockContextItems: ContextItem[] = [
       {
         name: "Long Page",
@@ -68,9 +68,8 @@ describe("fetchTool", () => {
 
     const result = await fetchTool.run({ url: "https://example.com" });
 
-    expect(result).toBe(
-      "This is the main content that was truncated.\n\nThe content from https://example.com was truncated because it exceeded the 20000 character limit.",
-    );
+    // Truncation warnings are filtered out - only the main content is returned
+    expect(result).toBe("This is the main content that was truncated.");
   });
 
   it("should handle multiple content items", async () => {
@@ -96,23 +95,21 @@ describe("fetchTool", () => {
     expect(result).toBe("Content from page 1\n\nContent from page 2");
   });
 
-  it("should return error message when no content items returned", async () => {
+  it("should throw error when no content items returned", async () => {
     mockFetchUrlContentImpl.mockResolvedValue([]);
 
-    const result = await fetchTool.run({ url: "https://example.com" });
-
-    expect(result).toBe(
-      "Error: Could not fetch content from https://example.com",
+    await expect(fetchTool.run({ url: "https://example.com" })).rejects.toThrow(
+      "Could not fetch content from https://example.com",
     );
   });
 
-  it("should handle errors from core implementation", async () => {
+  it("should throw errors from core implementation", async () => {
     const error = new Error("Network error");
     mockFetchUrlContentImpl.mockRejectedValue(error);
 
-    const result = await fetchTool.run({ url: "https://example.com" });
-
-    expect(result).toBe("Error: Network error");
+    await expect(fetchTool.run({ url: "https://example.com" })).rejects.toThrow(
+      "Error: Network error",
+    );
   });
 
   it("should call fetchUrlContentImpl with correct arguments", async () => {
