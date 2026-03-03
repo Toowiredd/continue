@@ -1,0 +1,80 @@
+name: Sync Fork with Upstream
+
+# Syncs Toowiredd/continue (fork) with continuedev/continue (upstream).
+# Only pulls changes FROM upstream INTO the fork — never pushes to upstream.
+on:
+  schedule:
+    # Runs daily at 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (fetch and diff only, do not push)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/continuedev/continue.git
+
+      - name: Fetch upstream
+        run: |
+          git fetch upstream main --no-tags
+
+      - name: Show divergence summary
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          AHEAD=$(git rev-list --count upstream/main..HEAD)
+          echo "Fork is ${BEHIND} commit(s) behind and ${AHEAD} commit(s) ahead of upstream/main."
+          echo "BEHIND=${BEHIND}" >> "$GITHUB_ENV"
+          echo "AHEAD=${AHEAD}" >> "$GITHUB_ENV"
+
+      - name: List recent upstream commits not in fork
+        run: |
+          echo "=== Latest 20 upstream commits not yet in this fork ==="
+          git log --oneline upstream/main ^HEAD --max-count=20 || true
+
+      - name: Merge upstream into fork main
+        if: ${{ env.BEHIND != '0' && inputs.dry_run != 'true' }}
+        run: |
+          git merge upstream/main \
+            --no-edit \
+            -m "chore: sync with upstream continuedev/continue ($(date -u '+%Y-%m-%d'))"
+
+      - name: Push to fork
+        if: ${{ env.BEHIND != '0' && inputs.dry_run != 'true' }}
+        run: |
+          git push origin main
+
+      - name: Summary
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Dry-run mode — no changes pushed. Fork is ${BEHIND} commit(s) behind upstream."
+          elif [ "${{ env.BEHIND }}" = "0" ]; then
+            echo "Fork is already up to date with upstream. Nothing to do."
+          else
+            echo "Successfully merged ${BEHIND} upstream commit(s) into fork main."
+          fi
