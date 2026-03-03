@@ -69,6 +69,7 @@ async function loadRules(ide: IDE) {
 
   return { rules, errors };
 }
+
 export default async function doLoadConfig(options: {
   ide: IDE;
   controlPlaneClient: ControlPlaneClient;
@@ -234,6 +235,7 @@ export default async function doLoadConfig(options: {
         uri: encodeMCPToolUri(server.id, tool.name),
         group: server.name,
         originalFunctionName: tool.name,
+        mcpMeta: tool._meta,
       }));
       newConfig.tools.push(...serverTools);
 
@@ -299,14 +301,15 @@ export default async function doLoadConfig(options: {
   }
 
   newConfig.tools.push(
-    ...getConfigDependentToolDefinitions({
+    ...(await getConfigDependentToolDefinitions({
       rules: newConfig.rules,
       enableExperimentalTools:
         newConfig.experimental?.enableExperimentalTools ?? false,
       isSignedIn,
       isRemote: await ide.isWorkspaceRemote(),
       modelName: newConfig.selectedModelByRole.chat?.model,
-    }),
+      ide,
+    })),
   );
 
   // Detect duplicate tool names
@@ -348,7 +351,12 @@ export default async function doLoadConfig(options: {
     }
   });
 
-  if (newConfig.allowAnonymousTelemetry !== false) {
+  // VS Code has an IDE telemetry setting
+  // Since it's a security concern we use OR behavior on false
+  if (
+    newConfig.allowAnonymousTelemetry !== false &&
+    ideInfo.ideType === "vscode"
+  ) {
     if ((await ide.isTelemetryEnabled()) === false) {
       newConfig.allowAnonymousTelemetry = false;
     }

@@ -1,19 +1,27 @@
 // Helper functions extracted from streamChatResponse.ts to reduce file size
+/* eslint-disable max-lines */
 
+import type { ToolStatus, Usage } from "core/index.js";
+import { calculateRequestCost } from "core/llm/utils/calculateRequestCost.js";
 import { ContinueError, ContinueErrorReason } from "core/util/errors.js";
 import { ChatCompletionToolMessageParam } from "openai/resources/chat/completions.mjs";
 
+import { ToolPermissionServiceState } from "src/services/ToolPermissionService.js";
+
 import { checkToolPermission } from "../permissions/permissionChecker.js";
 import { toolPermissionManager } from "../permissions/permissionManager.js";
-import { ToolCallRequest } from "../permissions/types.js";
-import { services } from "../services/index.js";
+import { ToolCallRequest, ToolPermissions } from "../permissions/types.js";
+import {
+  SERVICE_NAMES,
+  serviceContainer,
+  services,
+} from "../services/index.js";
+import { trackSessionUsage } from "../session.js";
 import { posthogService } from "../telemetry/posthogService.js";
 import { telemetryService } from "../telemetry/telemetryService.js";
-import { calculateTokenCost } from "../telemetry/utils.js";
 import {
   executeToolCall,
-  getAllBuiltinTools,
-  getAvailableTools,
+  getAllAvailableTools,
   Tool,
   validateToolCallArgsPresent,
 } from "../tools/index.js";
@@ -21,6 +29,10 @@ import { PreprocessedToolCall, ToolCall } from "../tools/types.js";
 import { logger } from "../util/logger.js";
 
 import { StreamCallbacks } from "./streamChatResponse.types.js";
+
+export interface ToolResultWithStatus extends ChatCompletionToolMessageParam {
+  status: ToolStatus;
+}
 
 // Helper function to handle permission denied
 export function handlePermissionDenied(
@@ -48,34 +60,6 @@ export function handlePermissionDenied(
 
   callbacks?.onToolResult?.(deniedMessage, toolCall.name, "canceled");
   logger.debug(`Tool call rejected (${reason}) - stopping stream`);
-}
-
-// Helper function to handle headless mode permission
-export async function handleHeadlessPermission(
-  toolCall: PreprocessedToolCall,
-): Promise<never> {
-  const allBuiltinTools = getAllBuiltinTools();
-  const tool = allBuiltinTools.find((t) => t.name === toolCall.name);
-  const toolName = tool?.displayName || toolCall.name;
-
-  // Import safeStderr to bypass console blocking in headless mode
-  const { safeStderr } = await import("../init.js");
-  safeStderr(
-    `Error: Tool '${toolName}' requires permission but cn is running in headless mode.\n`,
-  );
-  safeStderr(
-    `If you want to allow all tools without asking, use cn -p --auto "your prompt".\n`,
-  );
-  safeStderr(`If you want to allow this tool, use --allow ${toolName}.\n`);
-  safeStderr(
-    `If you don't want the tool to be included, use --exclude ${toolName}.\n`,
-  );
-
-  // Use graceful exit to flush telemetry even in headless denial
-  const { gracefulExit } = await import("../util/exit.js");
-  await gracefulExit(1);
-  // This line will never be reached, but TypeScript needs it for the 'never' return type
-  throw new Error("Exiting due to headless permission requirement");
 }
 
 // Helper function to request user permission
@@ -128,17 +112,19 @@ export async function requestUserPermission(
 
 // Helper function to check if tool permission is needed
 export async function checkToolPermissionApproval(
+  permissions: ToolPermissions,
   toolCall: PreprocessedToolCall,
   callbacks?: StreamCallbacks,
   isHeadless?: boolean,
 ): Promise<{ approved: boolean; denialReason?: "user" | "policy" }> {
-  const permissionCheck = checkToolPermission(toolCall);
+  const permissionCheck = checkToolPermission(toolCall, permissions);
 
   if (permissionCheck.permission === "allow") {
     return { approved: true };
   } else if (permissionCheck.permission === "ask") {
     if (isHeadless) {
-      await handleHeadlessPermission(toolCall);
+      // "ask" tools are excluded in headless so can only get here by policy evaluation
+      return { approved: false, denialReason: "policy" };
     }
     const userApproved = await requestUserPermission(toolCall, callbacks);
     return userApproved
@@ -257,6 +243,28 @@ export function processToolCallDelta(
   }
 }
 
+// Helper function to detect provider from model name
+function detectProvider(modelName: string): string {
+  const normalized = modelName.toLowerCase();
+  if (normalized.includes("gpt") || normalized.includes("openai")) {
+    return "openai";
+  }
+  if (normalized.includes("claude") || normalized.includes("anthropic")) {
+    return "anthropic";
+  }
+  // Default to anthropic for backward compatibility
+  return "anthropic";
+}
+
+// Simple fallback cost calculation for unknown models
+function calculateFallbackCost(
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  // Default pricing: $1/MTok input, $2/MTok output
+  return (inputTokens * 1 + outputTokens * 2) / 1_000_000;
+}
+
 // Helper function to record telemetry
 export function recordStreamTelemetry(options: {
   requestStartTime: number;
@@ -265,6 +273,7 @@ export function recordStreamTelemetry(options: {
   outputTokens: number;
   model: any;
   tools?: any[];
+  fullUsage?: any;
 }): number {
   const {
     requestStartTime,
@@ -273,13 +282,73 @@ export function recordStreamTelemetry(options: {
     outputTokens,
     model,
     tools,
+    fullUsage,
   } = options;
   const totalDuration = responseEndTime - requestStartTime;
-  const cost = calculateTokenCost(inputTokens, outputTokens, model.model);
 
-  telemetryService.recordTokenUsage(inputTokens, "input", model.model);
-  telemetryService.recordTokenUsage(outputTokens, "output", model.model);
+  // Calculate cost using comprehensive pricing that includes caching
+  let cost: number;
+  let usage: Usage;
+
+  if (fullUsage) {
+    // Transform API usage format to Usage interface
+    usage = {
+      promptTokens: fullUsage.prompt_tokens,
+      completionTokens: fullUsage.completion_tokens,
+      promptTokensDetails: fullUsage.prompt_tokens_details
+        ? {
+            cachedTokens: fullUsage.prompt_tokens_details.cache_read_tokens,
+            cacheWriteTokens:
+              fullUsage.prompt_tokens_details.cache_write_tokens,
+          }
+        : undefined,
+    };
+
+    // Detect provider and calculate cost
+    const provider = detectProvider(model.model);
+    const costBreakdown = calculateRequestCost(provider, model.model, usage);
+
+    // Use fallback for unknown models
+    cost =
+      costBreakdown?.cost ??
+      calculateFallbackCost(
+        fullUsage.prompt_tokens,
+        fullUsage.completion_tokens,
+      );
+  } else {
+    // Fallback when fullUsage not available
+    usage = {
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+    };
+    cost = calculateFallbackCost(inputTokens, outputTokens);
+  }
+
+  // Use tokens from fullUsage if available, otherwise use the passed params
+  const actualInputTokens = fullUsage?.prompt_tokens ?? inputTokens;
+  const actualOutputTokens = fullUsage?.completion_tokens ?? outputTokens;
+
+  telemetryService.recordTokenUsage(actualInputTokens, "input", model.model);
+  telemetryService.recordTokenUsage(actualOutputTokens, "output", model.model);
+
+  // Record cache tokens if available
+  if (fullUsage?.prompt_tokens_details?.cache_read_tokens) {
+    telemetryService.recordTokenUsage(
+      fullUsage.prompt_tokens_details.cache_read_tokens,
+      "cacheRead",
+      model.model,
+    );
+  }
+  if (fullUsage?.prompt_tokens_details?.cache_write_tokens) {
+    telemetryService.recordTokenUsage(
+      fullUsage.prompt_tokens_details.cache_write_tokens,
+      "cacheCreation",
+      model.model,
+    );
+  }
+
   telemetryService.recordCost(cost, model.model);
+  trackSessionUsage(cost, usage);
 
   telemetryService.recordResponseTime(
     totalDuration,
@@ -292,21 +361,62 @@ export function recordStreamTelemetry(options: {
     model: model.model,
     durationMs: totalDuration,
     success: true,
-    inputTokens,
-    outputTokens,
+    inputTokens: actualInputTokens,
+    outputTokens: actualOutputTokens,
     costUsd: cost,
   });
 
   // Mirror core metrics to PostHog for product analytics
+  const cacheReadTokens =
+    fullUsage?.prompt_tokens_details?.cache_read_tokens ?? 0;
+  const cacheWriteTokens =
+    fullUsage?.prompt_tokens_details?.cache_write_tokens ?? 0;
+
   try {
     posthogService.capture("apiRequest", {
       model: model.model,
       durationMs: totalDuration,
-      inputTokens,
-      outputTokens,
+      inputTokens: actualInputTokens,
+      outputTokens: actualOutputTokens,
       costUsd: cost,
+      cacheReadTokens,
+      cacheWriteTokens,
     });
+
+    // Emit prompt_cache_metrics for the Prompt Cache Performance dashboard
+    if (actualInputTokens > 0) {
+      posthogService.capture("prompt_cache_metrics", {
+        model: model.model,
+        cache_read_tokens: cacheReadTokens,
+        cache_write_tokens: cacheWriteTokens,
+        total_prompt_tokens: actualInputTokens,
+        cache_hit_rate: cacheReadTokens / actualInputTokens,
+        tool_count: tools?.length ?? 0,
+      });
+    }
   } catch {}
+
+  // Report prompt cache metrics to PostHog
+  if (fullUsage?.prompt_tokens_details) {
+    const cacheReadTokens =
+      fullUsage.prompt_tokens_details.cache_read_tokens ?? 0;
+    const cacheWriteTokens =
+      fullUsage.prompt_tokens_details.cache_write_tokens ?? 0;
+    const totalPromptTokens = fullUsage.prompt_tokens ?? 0;
+    const cacheHitRate =
+      totalPromptTokens > 0 ? cacheReadTokens / totalPromptTokens : 0;
+
+    try {
+      void posthogService.capture("prompt_cache_metrics", {
+        model: model.model,
+        cache_read_tokens: cacheReadTokens,
+        cache_write_tokens: cacheWriteTokens,
+        total_prompt_tokens: totalPromptTokens,
+        cache_hit_rate: cacheHitRate,
+        tool_count: tools?.length ?? 0,
+      });
+    } catch {}
+  }
 
   return cost;
 }
@@ -318,6 +428,7 @@ export function recordStreamTelemetry(options: {
  * @returns - Preprocessed tool calls that are ready for execution
  */
 export async function preprocessStreamedToolCalls(
+  isHeadless: boolean,
   toolCalls: ToolCall[],
   callbacks?: StreamCallbacks,
 ): Promise<{
@@ -328,12 +439,12 @@ export async function preprocessStreamedToolCalls(
   const errorChatEntries: ChatCompletionToolMessageParam[] = [];
 
   // Get all available tools
-  const availableTools: Tool[] = await getAvailableTools();
 
   // Process each tool call
   for (const toolCall of toolCalls) {
     const startTime = Date.now();
     try {
+      const availableTools: Tool[] = await getAllAvailableTools(isHeadless);
       const tool = availableTools.find((t) => t.name === toolCall.name);
       if (!tool) {
         throw new Error(`Tool ${toolCall.name} not found`);
@@ -409,7 +520,7 @@ export async function preprocessStreamedToolCalls(
  * Executes preprocessed tool calls, handling permissions and results
  * @param preprocessedCalls - The preprocessed tool calls ready for execution
  * @param callbacks - Optional callbacks for notifying of events
- * @returns - Chat history entries with tool results
+ * @returns - Chat history entries with tool results and status information
  */
 export async function executeStreamedToolCalls(
   preprocessedCalls: PreprocessedToolCall[],
@@ -417,10 +528,14 @@ export async function executeStreamedToolCalls(
   isHeadless?: boolean,
 ): Promise<{
   hasRejection: boolean;
-  chatHistoryEntries: ChatCompletionToolMessageParam[];
+  chatHistoryEntries: ToolResultWithStatus[];
 }> {
   // Strategy: queue permissions (preserve order), then run approved tools in parallel.
   // If any permission is rejected, cancel the remaining tools in this batch.
+  //
+  // NOTE: parallelToolCallCount is passed to each tool so they can divide their
+  // output limits accordingly to avoid context overflow. Bash/Read do this for now
+  const parallelToolCallCount = preprocessedCalls.length;
 
   type IndexedCall = { index: number; call: PreprocessedToolCall };
   const indexedCalls: IndexedCall[] = preprocessedCalls.map((call, index) => ({
@@ -428,7 +543,7 @@ export async function executeStreamedToolCalls(
     call,
   }));
 
-  const entriesByIndex = new Map<number, ChatCompletionToolMessageParam>();
+  const entriesByIndex = new Map<number, ToolResultWithStatus>();
   const execPromises: Promise<void>[] = [];
 
   let hasRejection = false;
@@ -447,24 +562,30 @@ export async function executeStreamedToolCalls(
       callbacks?.onToolStart?.(call.name, call.arguments);
 
       // Check tool permissions using helper
+      const permissionState =
+        await serviceContainer.get<ToolPermissionServiceState>(
+          SERVICE_NAMES.TOOL_PERMISSIONS,
+        );
       const permissionResult = await checkToolPermissionApproval(
+        permissionState.permissions,
         call,
         callbacks,
         isHeadless,
       );
 
       if (!permissionResult.approved) {
-        // Permission denied: record and mark rejection
+        // Permission denied: create entry with canceled status
         const denialReason = permissionResult.denialReason || "user";
         const deniedMessage =
           denialReason === "policy"
             ? `Command blocked by security policy`
             : `Permission denied by user`;
 
-        const deniedEntry: ChatCompletionToolMessageParam = {
+        const deniedEntry: ToolResultWithStatus = {
           role: "tool",
           tool_call_id: call.id,
           content: deniedMessage,
+          status: "canceled",
         };
         entriesByIndex.set(index, deniedEntry);
         callbacks?.onToolResult?.(
@@ -498,11 +619,15 @@ export async function executeStreamedToolCalls(
               name: call.name,
               arguments: call.arguments,
             });
-            const toolResult = await executeToolCall(call);
-            const entry: ChatCompletionToolMessageParam = {
+
+            const toolResult = await executeToolCall(call, {
+              parallelToolCallCount,
+            });
+            const entry: ToolResultWithStatus = {
               role: "tool",
               tool_call_id: call.id,
               content: toolResult,
+              status: "done",
             };
             entriesByIndex.set(index, entry);
             callbacks?.onToolResult?.(toolResult, call.name, "done");
@@ -526,6 +651,7 @@ export async function executeStreamedToolCalls(
               role: "tool",
               tool_call_id: call.id,
               content: errorMessage,
+              status: "errored",
             });
             callbacks?.onToolError?.(errorMessage, call.name);
             // Immediate service update for UI feedback
@@ -551,6 +677,7 @@ export async function executeStreamedToolCalls(
         role: "tool",
         tool_call_id: call.id,
         content: errorMessage,
+        status: "errored",
       });
       callbacks?.onToolError?.(errorMessage, call.name);
       // Treat permission errors like execution errors but do not stop the batch
@@ -567,9 +694,9 @@ export async function executeStreamedToolCalls(
   await Promise.all(execPromises);
 
   // Assemble final entries in original order
-  const chatHistoryEntries: ChatCompletionToolMessageParam[] = preprocessedCalls
+  const chatHistoryEntries: ToolResultWithStatus[] = preprocessedCalls
     .map((_, index) => entriesByIndex.get(index))
-    .filter((e): e is ChatCompletionToolMessageParam => !!e);
+    .filter((e): e is ToolResultWithStatus => !!e);
 
   return {
     hasRejection,

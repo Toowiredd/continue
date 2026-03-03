@@ -58,11 +58,55 @@ const PROVIDER_HANDLES_TEMPLATING: string[] = [
   "sagemaker",
   "continue-proxy",
   "mistral",
+  "mimo",
   "sambanova",
   "vertexai",
   "watsonx",
   "nebius",
   "relace",
+  "openrouter",
+  "deepseek",
+  "xAI",
+  "groq",
+  "gemini",
+  "docker",
+  "nous",
+  "zAI",
+  // TODO add these, change to inverted logic so only the ones that need templating are hardcoded
+  // Asksage.ts
+  // Azure.ts
+  // BedrockImport.ts
+  // Cerebras.ts
+  // Cloudflare.ts
+  // CometAPI.ts
+  // CustomLLM.ts
+  // DeepInfra.ts
+  // Fireworks.ts
+  // Flowise.ts
+  // FunctionNetwork.ts
+  // HuggingFaceInferenceAPI.ts
+  // HuggingFaceTEI.ts
+  // HuggingFaceTGI.ts
+  // Inception.ts
+  // Kindo.ts
+  // LlamaCpp.ts
+  // LlamaStack.ts
+  // Llamafile.ts
+  // Mock.ts
+  // Moonshot.ts
+  // NCompass.ts
+  // OVHcloud.ts
+  // Replicate.ts
+  // Scaleway.ts
+  // SiliconFlow.ts
+  // TARS.ts
+  // Test.ts
+  // TextGenWebUI.ts
+  // TransformersJsEmbeddingsProvider.ts
+  // Venice.ts
+  // Vllm.ts
+  // Voyage.ts
+  // etc
 ];
 
 const PROVIDER_SUPPORTS_IMAGES: string[] = [
@@ -85,6 +129,7 @@ const PROVIDER_SUPPORTS_IMAGES: string[] = [
   "nebius",
   "ovhcloud",
   "watsonx",
+  "zAI",
 ];
 
 const MODEL_SUPPORTS_IMAGES: RegExp[] = [
@@ -105,6 +150,8 @@ const MODEL_SUPPORTS_IMAGES: RegExp[] = [
   /\bgemma-?3(?!n)/, // gemma3 supports vision, but gemma3n doesn't!
   /\b(pali|med)gemma/,
   /qwen(.*)vl/,
+  /mistral-small/,
+  /mistral-medium/,
 ];
 
 function modelSupportsImages(
@@ -142,16 +189,42 @@ function modelSupportsReasoning(
   if (!model) {
     return false;
   }
-  if ("anthropic" === model.underlyingProviderName) {
+  if (model.completionOptions?.reasoning !== undefined) {
+    // Reasoning support is forced at the config level. Model might not necessarily support it though!
+    return model.completionOptions.reasoning;
+  }
+  // Seems our current way of disabling reasoning is not working for grok code so results in useless lightbulb
+  // if (model.model.includes("grok-code")) {
+  //   return true;
+  // }
+  // do not turn reasoning on by default for claude 3 models
+  if (
+    model.model.includes("claude") &&
+    !model.model.includes("-3-") &&
+    !model.model.includes("-3.5-")
+  ) {
+    return true;
+  }
+  if (model.model.includes("command-a-reasoning")) {
     return true;
   }
   if (model.model.includes("deepseek-r")) {
     return true;
   }
-  if (model.completionOptions?.reasoning) {
-    // Reasoning support is forced at the config level. Model might not necessarily support it though!
+  // o-series reasoning models
+  if (/^o[134]/.test(model.model)) {
     return true;
   }
+  if (model.model.includes("codex")) {
+    return true;
+  }
+  if (model.model.includes("magistral")) {
+    return true;
+  }
+  if (model.model.includes("grok-4")) {
+    return true;
+  }
+
   return false;
 }
 
@@ -199,6 +272,7 @@ function isProviderHandlesTemplatingOrNoTemplateTypeRequired(
     modelName.includes("moonshot") ||
     modelName.includes("kimi") ||
     modelName.includes("mercury") ||
+    modelName.includes("glm") ||
     /^o\d/.test(modelName)
   );
 }
@@ -306,6 +380,10 @@ function autodetectTemplateType(model: string): TemplateType | undefined {
 
   if (lower.includes("deepseek")) {
     return "deepseek";
+  }
+
+  if (lower.includes("hermes")) {
+    return "chatml";
   }
 
   if (lower.includes("ninja") || lower.includes("openchat")) {

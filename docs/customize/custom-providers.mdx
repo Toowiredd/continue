@@ -7,10 +7,6 @@ As an example, say you are working on solving a new GitHub Issue. You type '@Iss
 
 ![Context Items](/images/customize/images/context-provider-example-0c96ff77286fa970b23dddfdc1fa986a.png)
 
-## How Do Context Blocks Work?
-
-You can add context providers to assistants using [`context` blocks](/hub/configs/block-types#context). Explore available context blocks in [the hub](https://hub.continue.dev/explore/context).
-
 ## Built-in Context Providers
 
 You can add any built-in context-providers in your config file as shown below:
@@ -77,7 +73,7 @@ context:  - provider: docs
 
 Note that this will only enable the `@Docs` context provider.
 
-To use it, you need to add a documentation site to your config file. See the [docs](/customize/overview#documentation-context) page for more information.
+To use it, you need to add a documentation site to your config file. See the [docs](/guides/codebase-documentation-awareness) page for more information.
 
 ### @Open Context Provider – Reference All Open Files or Pinned Files
 
@@ -118,7 +114,7 @@ context:
   - provider: codebase
 ```
 
-Read more about indexing and retrieval [here](/customize/overview#codebase-context).
+Read more about indexing and retrieval [here](/guides/codebase-documentation-awareness).
 
 ### @Folder Context Provider – Reference Code from a Specific Folder
 

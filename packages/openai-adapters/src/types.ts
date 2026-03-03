@@ -55,6 +55,7 @@ export const OpenAIConfigSchema = BasePlusConfig.extend({
     z.literal("text-gen-webui"),
     z.literal("vllm"),
     z.literal("xAI"),
+    z.literal("zAI"),
     z.literal("scaleway"),
     z.literal("ncompass"),
     z.literal("relace"),
@@ -123,6 +124,68 @@ export const CometAPIConfigSchema = OpenAIConfigSchema.extend({
 });
 export type CometAPIConfig = z.infer<typeof CometAPIConfigSchema>;
 
+export const AskSageConfigSchema = BasePlusConfig.extend({
+  provider: z.literal("askSage"),
+  env: z
+    .object({
+      email: z.string().optional(),
+      userApiUrl: z.string().optional(),
+    })
+    .optional(),
+});
+export type AskSageConfig = z.infer<typeof AskSageConfigSchema>;
+
+/**
+ * AskSage tool format (OpenAI-compatible)
+ */
+export interface AskSageTool {
+  type: string;
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+}
+
+export type AskSageToolChoice =
+  | "auto"
+  | "none"
+  | { type: "function"; function: { name: string } };
+
+export interface AskSageToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+/**
+ * AskSage API response format
+ */
+export interface AskSageResponse {
+  text?: string;
+  answer?: string;
+  message?: string;
+  status?: number | string;
+  response?: unknown;
+  tool_calls?: AskSageToolCall[];
+  choices?: Array<{
+    message?: {
+      content?: string;
+      tool_calls?: AskSageToolCall[];
+    };
+  }>;
+}
+
+export interface AskSageTokenResponse {
+  status: number | string;
+  response: {
+    access_token: string;
+  };
+}
+
 export const AzureConfigSchema = OpenAIConfigSchema.extend({
   provider: z.literal("azure"),
   env: z
@@ -187,6 +250,13 @@ export const VertexAIConfigSchema = BasePlusConfig.extend({
 });
 export type VertexAIConfig = z.infer<typeof VertexAIConfigSchema>;
 
+export const AiSdkConfigSchema = BasePlusConfig.extend({
+  provider: z.literal("ai-sdk"),
+  model: z.string(),
+  providerOptions: z.record(z.unknown()).optional(),
+});
+export type AiSdkConfig = z.infer<typeof AiSdkConfigSchema>;
+
 // Discriminated union
 export const LLMConfigSchema = z.discriminatedUnion("provider", [
   OpenAIConfigSchema,
@@ -205,5 +275,7 @@ export const LLMConfigSchema = z.discriminatedUnion("provider", [
   LlamastackConfigSchema,
   ContinueProxyConfigSchema,
   CometAPIConfigSchema,
+  AskSageConfigSchema,
+  AiSdkConfigSchema,
 ]);
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;

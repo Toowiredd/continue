@@ -3,9 +3,6 @@ name: Sync Fork with Upstream
 # Syncs Toowiredd/continue (fork) with continuedev/continue (upstream).
 # Only pulls changes FROM upstream INTO the fork — never pushes to upstream.
 on:
-  schedule:
-    # Runs daily at 06:00 UTC
-    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

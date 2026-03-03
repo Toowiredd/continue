@@ -14,8 +14,10 @@ import {
 } from "../redux/slices/profilesSlice";
 import {
   addContextItemsAtIndex,
+  newSession,
   setHasReasoningEnabled,
   setIsSessionMetadataLoading,
+  setMode,
 } from "../redux/slices/sessionSlice";
 import { setTTSActive } from "../redux/slices/uiSlice";
 
@@ -40,6 +42,9 @@ function ParallelListeners() {
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
   const selectedProfileId = useAppSelector(
     (store) => store.profiles.selectedProfileId,
+  );
+  const reasoningSettings = useAppSelector(
+    (store) => store.ui.reasoningSettings,
   );
   const hasDoneInitialConfigLoad = useRef(false);
 
@@ -86,11 +91,18 @@ function ParallelListeners() {
       const supportsReasoning = modelSupportsReasoning(chatModel);
       const isReasoningDisabled =
         chatModel?.completionOptions?.reasoning === false;
+      const wasReasoningPreviouslyEnabled = chatModel?.title
+        ? reasoningSettings[chatModel.title] !== false
+        : true;
       dispatch(
-        setHasReasoningEnabled(supportsReasoning && !isReasoningDisabled),
+        setHasReasoningEnabled(
+          supportsReasoning &&
+            !isReasoningDisabled &&
+            wasReasoningPreviouslyEnabled,
+        ),
       );
     },
-    [dispatch, hasDoneInitialConfigLoad],
+    [dispatch, hasDoneInitialConfigLoad, selectedProfileId, reasoningSettings],
   );
 
   // Load config from the IDE
@@ -213,6 +225,11 @@ function ParallelListeners() {
 
   useWebviewListener("setInactive", async () => {
     void dispatch(cancelStream());
+  });
+
+  useWebviewListener("loadAgentSession", async (data) => {
+    dispatch(newSession(data.session));
+    dispatch(setMode("agent"));
   });
 
   useWebviewListener("setTTSActive", async (status) => {

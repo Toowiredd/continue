@@ -5,28 +5,52 @@ import node_machine_id from "node-machine-id";
 import type { PostHog as PostHogType } from "posthog-node";
 
 import { isAuthenticatedConfig, loadAuthConfig } from "../auth/workos.js";
+import { loggers } from "../logging.js";
 import { isHeadlessMode, isServe } from "../util/cli.js";
 import { isGitHubActions } from "../util/git.js";
 import { logger } from "../util/logger.js";
 import { getVersion } from "../version.js";
 
 export class PosthogService {
-  private os: string | undefined;
-  private uniqueId: string;
+  private _os: string | undefined;
+  private _uniqueId: string | undefined;
+  private _telemetryBlocked: boolean = false;
 
   constructor() {
-    this.os = os.platform();
-    this.uniqueId = this.getEventUserId();
+    // Initialization is now lazy to avoid issues with mocking in tests
+  }
+
+  private get os(): string {
+    if (!this._os) {
+      this._os = os.platform();
+    }
+    return this._os;
+  }
+
+  public get uniqueId(): string {
+    if (!this._uniqueId) {
+      this._uniqueId = this.getEventUserId();
+    }
+    return this._uniqueId;
   }
 
   private _hasInternetConnection: boolean | undefined = undefined;
   private async hasInternetConnection() {
     const refetchConnection = async () => {
       try {
-        await dns.lookup("app.posthog.com");
-        this._hasInternetConnection = true;
+        const result = await dns.lookup("app.posthog.com");
+        const isValidAddress =
+          result.address !== "0.0.0.0" && !result.address.startsWith("127.");
+        this._hasInternetConnection = isValidAddress;
+        this._telemetryBlocked = !isValidAddress;
+        if (!isValidAddress) {
+          logger.debug(
+            "DNS lookup returned invalid address for PostHog, skipping telemetry",
+          );
+        }
       } catch {
         this._hasInternetConnection = false;
+        this._telemetryBlocked = false;
       }
     };
 
@@ -40,6 +64,12 @@ export class PosthogService {
   }
 
   get isEnabled() {
+    if (process.env.CONTINUE_TELEMETRY_ENABLED === "0") {
+      return false;
+    }
+    if (process.env.CONTINUE_TELEMETRY_ENABLED === "1") {
+      return true;
+    }
     return process.env.CONTINUE_ALLOW_ANONYMOUS_TELEMETRY !== "0";
   }
 
@@ -47,7 +77,13 @@ export class PosthogService {
   private async getClient() {
     if (!(await this.hasInternetConnection())) {
       this._client = undefined;
-      logger.warn("No internet connection, skipping telemetry");
+      if (this._telemetryBlocked && this.isEnabled) {
+        loggers.warning(
+          "Telemetry appears to be blocked by your network. To disable telemetry entirely, set CONTINUE_TELEMETRY_ENABLED=0",
+        );
+      } else if (this.isEnabled) {
+        logger.warn("No internet connection, skipping telemetry");
+      }
     } else if (this.isEnabled) {
       if (!this._client) {
         const { PostHog } = await import("posthog-node");
@@ -66,10 +102,16 @@ export class PosthogService {
   }
 
   /**
-   * - Continue user id if signed in
+   * - Continue user id from environment (when running as agent)
+   * - Continue user id if signed in locally
    * - Unique machine id if not signed in
    */
   private getEventUserId(): string {
+    // When running as an agent, use the user ID from the environment
+    if (process.env.CONTINUE_USER_ID) {
+      return process.env.CONTINUE_USER_ID;
+    }
+
     const authConfig = loadAuthConfig();
 
     if (isAuthenticatedConfig(authConfig)) {

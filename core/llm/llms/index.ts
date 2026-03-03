@@ -37,11 +37,13 @@ import LlamaStack from "./LlamaStack";
 import Lemonade from "./Lemonade";
 import LMStudio from "./LMStudio";
 import Mistral from "./Mistral";
+import Mimo from "./Mimo";
 import MockLLM from "./Mock";
 import Moonshot from "./Moonshot";
 import Msty from "./Msty";
 import NCompass from "./NCompass";
 import Nebius from "./Nebius";
+import Nous from "./Nous";
 import Novita from "./Novita";
 import Nvidia from "./Nvidia";
 import Ollama from "./Ollama";
@@ -65,6 +67,7 @@ import Vllm from "./Vllm";
 import Voyage from "./Voyage";
 import WatsonX from "./WatsonX";
 import xAI from "./xAI";
+import zAI from "./zAI";
 export const LLMClasses = [
   Anthropic,
   Cohere,
@@ -88,6 +91,7 @@ export const LLMClasses = [
   Lemonade,
   LMStudio,
   Mistral,
+  Mimo,
   Bedrock,
   BedrockImport,
   SageMaker,
@@ -112,6 +116,7 @@ export const LLMClasses = [
   Cerebras,
   Asksage,
   Nebius,
+  Nous,
   Venice,
   VertexAI,
   xAI,
@@ -122,6 +127,7 @@ export const LLMClasses = [
   Voyage,
   LlamaStack,
   TARS,
+  zAI,
 ];
 
 export async function llmFromDescription(

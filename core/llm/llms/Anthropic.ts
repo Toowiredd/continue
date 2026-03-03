@@ -28,15 +28,16 @@ import {
 } from "../../index.js";
 import { safeParseToolCallArgs } from "../../tools/parseArgs.js";
 import { renderChatMessage, stripImages } from "../../util/messageContent.js";
+import { extractBase64FromDataUrl } from "../../util/url.js";
 import { DEFAULT_REASONING_TOKENS } from "../constants.js";
 import { BaseLLM } from "../index.js";
 
 class Anthropic extends BaseLLM {
   static providerName = "anthropic";
   static defaultOptions: Partial<LLMOptions> = {
-    model: "claude-3-5-sonnet-latest",
+    model: "claude-sonnet-4-6",
     completionOptions: {
-      model: "claude-3-5-sonnet-latest",
+      model: "claude-sonnet-4-6",
       maxTokens: 8192,
     },
     apiBase: "https://api.anthropic.com/v1/",
@@ -87,30 +88,44 @@ class Anthropic extends BaseLLM {
   private convertMessageContentToBlocks(
     content: MessageContent,
   ): ContentBlockParam[] {
+    const parts: ContentBlockParam[] = [];
     if (typeof content === "string") {
-      return [
-        {
+      if (content) {
+        parts.push({
           type: "text",
           text: content,
-        },
-      ];
-    }
-    return content.map((part) => {
-      if (part.type === "text") {
-        return {
-          type: "text",
-          text: part.text,
-        };
+        });
       }
-      return {
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: getAnthropicMediaTypeFromDataUrl(part.imageUrl.url),
-          data: part.imageUrl.url.split(",")[1],
-        },
-      };
-    });
+    } else {
+      for (const part of content) {
+        if (part.type === "text") {
+          if (part.text) {
+            parts.push({
+              type: "text",
+              text: part.text,
+            });
+          }
+        } else {
+          const base64Data = extractBase64FromDataUrl(part.imageUrl.url);
+          if (base64Data) {
+            parts.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: getAnthropicMediaTypeFromDataUrl(part.imageUrl.url),
+                data: base64Data,
+              },
+            });
+          } else {
+            console.warn(
+              "Anthropic: skipping image with invalid data URL format",
+              part.imageUrl.url,
+            );
+          }
+        }
+      }
+    }
+    return parts;
   }
 
   private convertToolCallsToBlocks(
@@ -152,20 +167,30 @@ class Anthropic extends BaseLLM {
             },
           ];
         }
+        // Strip thinking that has no signature
+        const signature = message.signature;
+        if (!signature) {
+          return [];
+        }
         if (typeof message.content === "string") {
+          if (!message.content) {
+            return [];
+          }
           return [
             {
               type: "thinking",
               thinking: message.content,
-              signature: message.signature ?? "", // TODO - unsafe signature
+              signature,
             },
           ];
         }
-        const textParts = message.content.filter((p) => p.type === "text");
+        const textParts = message.content
+          .filter((p) => p.type === "text")
+          .filter((p) => !!p.text);
         return textParts.map((part) => ({
           type: "thinking",
           thinking: part.text,
-          signature: message.signature ?? "", // TODO - unsafe signature
+          signature,
         }));
       case "assistant":
         const blocks: ContentBlockParam[] = this.convertMessageContentToBlocks(
@@ -382,7 +407,7 @@ class Anthropic extends BaseLLM {
   ): AsyncGenerator<ChatMessage> {
     if (!this.apiKey || this.apiKey === "") {
       throw new Error(
-        "Request not sent. You have an Anthropic model configured in your config.json, but the API key is not set.",
+        "Request not sent. You have an Anthropic model configured in your config.yaml, but the API key is not set.",
       );
     }
 
@@ -401,6 +426,7 @@ class Anthropic extends BaseLLM {
     const headers = getAnthropicHeaders(
       this.apiKey,
       shouldCacheSystemMessage || shouldCachePrompt,
+      this.apiBase,
     );
 
     const body: MessageCreateParams = {

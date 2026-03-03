@@ -2,6 +2,8 @@ import {
   AgentFile,
   AssistantUnrolled,
   ModelConfig,
+  parseAgentFileRules,
+  parseAgentFileTools,
 } from "@continuedev/config-yaml";
 import { BaseLlmApi } from "@continuedev/openai-adapters";
 import { AssistantConfig } from "@continuedev/sdk";
@@ -12,7 +14,6 @@ import { AuthConfig } from "../auth/workos.js";
 import { BaseCommandOptions } from "../commands/BaseCommandOptions.js";
 import { PermissionMode } from "../permissions/types.js";
 
-import { AgentFileService } from "./AgentFileService.js";
 import { type MCPService } from "./MCPService.js";
 
 /**
@@ -119,12 +120,23 @@ export interface StorageSyncServiceState {
 export interface AgentFileServiceState {
   agentFile: AgentFile | null;
   slug: string | null;
-  agentFileModelName: string | null;
-  agentFileService: AgentFileService | null;
+  agentFileModel: ModelConfig | null;
+  parsedTools: ReturnType<typeof parseAgentFileTools> | null;
+  parsedRules: ReturnType<typeof parseAgentFileRules> | null;
 }
 
+export interface ArtifactUploadServiceState {
+  uploadsInProgress: number;
+  lastError: string | null;
+}
+
+export type {
+  BackgroundJob,
+  BackgroundJobStatus,
+} from "./BackgroundJobService.js";
 export type { ChatHistoryState } from "./ChatHistoryService.js";
 export type { FileIndexServiceState } from "./FileIndexService.js";
+export type { GitAiIntegrationServiceState } from "./GitAiIntegrationService.js";
 
 /**
  * Service names as constants to prevent typos
@@ -143,6 +155,10 @@ export const SERVICE_NAMES = {
   UPDATE: "update",
   STORAGE_SYNC: "storageSync",
   AGENT_FILE: "agentFile",
+  ARTIFACT_UPLOAD: "artifactUpload",
+  GIT_AI_INTEGRATION: "gitAiIntegration",
+  BACKGROUND_JOBS: "backgroundJobs",
+  QUIZ: "quiz",
 } as const;
 
 /**

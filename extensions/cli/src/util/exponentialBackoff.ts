@@ -1,4 +1,4 @@
-import { BaseLlmApi } from "@continuedev/openai-adapters";
+import { BaseLlmApi, isResponsesModel } from "@continuedev/openai-adapters";
 import type { ChatCompletionCreateParamsStreaming } from "openai/resources.mjs";
 
 import { error, warn } from "../logging.js";
@@ -80,8 +80,18 @@ function isConnectionError(errorMessage: string): boolean {
 /**
  * Checks if the error indicates a context length issue (non-retryable)
  */
-export function isContextLengthError(error: any): boolean {
+export function isContextLengthError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
   const errorMessage = error.message?.toLowerCase() || "";
+
+  if (errorMessage.includes("invalid_request_error")) {
+    if (errorMessage.includes("context")) {
+      return true;
+    }
+  }
+
   const contextLengthPatterns = [
     // Anthropic Claude
     "input length and max_tokens exceed context limit",
@@ -94,7 +104,6 @@ export function isContextLengthError(error: any): boolean {
     "use a shorter prompt",
     // Generic patterns
     "context_length_exceeded",
-    "invalid_request_error",
   ];
 
   return contextLengthPatterns.some((pattern) =>
@@ -173,6 +182,14 @@ export async function chatCompletionStreamWithBackoff(
         throw new Error("Request aborted");
       }
 
+      const useResponses =
+        typeof llmApi.responsesStream === "function" &&
+        isResponsesModel(params.model);
+
+      if (useResponses) {
+        return llmApi.responsesStream!(params, abortSignal);
+      }
+
       return llmApi.chatCompletionStream(params, abortSignal);
     } catch (err: any) {
       lastError = err;
@@ -189,6 +206,14 @@ export async function chatCompletionStreamWithBackoff(
 
       // Only retry if the error is retryable
       if (!isRetryableError(err)) {
+        // Log full error details for non-retryable errors
+        logger.error("Non-retryable LLM API error", err, {
+          status: err.status,
+          statusText: err.statusText,
+          message: err.message,
+          error: err.error,
+          model: params.model,
+        });
         throw err;
       }
 

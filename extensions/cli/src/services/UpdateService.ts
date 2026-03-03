@@ -50,6 +50,15 @@ export class UpdateService extends BaseService<UpdateServiceState> {
     });
 
     try {
+      // skip checking for updates in dev
+      if (this.currentState.currentVersion === "0.0.0-dev") {
+        this.setState({
+          status: UpdateStatus.IDLE,
+          message: `Continue CLI`,
+        });
+        return; // Uncomment to test auto-update behavior in dev
+      }
+
       // Check for updates
       this.setState({
         status: UpdateStatus.CHECKING,
@@ -78,16 +87,6 @@ export class UpdateService extends BaseService<UpdateServiceState> {
       this.setState({
         isUpdateAvailable,
       });
-
-      if (this.currentState.currentVersion === "0.0.0-dev") {
-        this.setState({
-          status: UpdateStatus.IDLE,
-          message: `Continue CLI`,
-          isUpdateAvailable,
-          latestVersion,
-        });
-        return; // Uncomment to test auto-update behavior in dev
-      }
 
       // If update is available, automatically update
       if (
@@ -171,17 +170,15 @@ export class UpdateService extends BaseService<UpdateServiceState> {
 
       this.setState({
         status: UpdateStatus.UPDATED,
-        message: `${isAutoUpdate ? "Auto-updated to" : "Restart for"} v${this.currentState.latestVersion}`,
+        message: `Updated to v${this.currentState.latestVersion}`,
         isUpdateAvailable: false,
       });
-      if (isAutoUpdate) {
-        this.restartCLI();
-      }
+      this.restartCLI();
     } catch (error: any) {
       logger.error("Error updating CLI:", error);
       this.setState({
         status: UpdateStatus.ERROR,
-        message: isAutoUpdate ? "Auto-update failed" : "Update failed",
+        message: "Update failed",
         error,
       });
       setTimeout(() => {

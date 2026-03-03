@@ -93,9 +93,10 @@ async function handleLogout() {
   }
 }
 
-function handleWhoami() {
-  if (isAuthenticated()) {
-    const config = loadAuthConfig();
+async function handleWhoami() {
+  const authed = await isAuthenticated();
+  if (authed) {
+    const config = loadAuthConfig(); // TODO duplicate auth config loading
     if (config && isAuthenticatedConfig(config)) {
       return {
         exit: false,
@@ -168,6 +169,10 @@ function handleTitle(args: string[]) {
   }
 }
 
+function handleJobs() {
+  return { openJobsSelector: true };
+}
+
 const commandHandlers: Record<string, CommandHandler> = {
   help: handleHelp,
   clear: () => {
@@ -202,6 +207,7 @@ const commandHandlers: Record<string, CommandHandler> = {
   update: () => {
     return { openUpdateSelector: true };
   },
+  jobs: handleJobs,
 };
 
 export async function handleSlashCommands(

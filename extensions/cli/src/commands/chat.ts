@@ -30,10 +30,10 @@ import { gracefulExit } from "../util/exit.js";
 import { formatAnthropicError, formatError } from "../util/formatError.js";
 import { logger } from "../util/logger.js";
 import { question } from "../util/prompt.js";
+import { prependPrompt } from "../util/promptProcessor.js";
 import {
   calculateContextUsagePercentage,
   countChatHistoryTokens,
-  shouldAutoCompact,
 } from "../util/tokenizer.js";
 
 import { ExtendedCommandOptions } from "./BaseCommandOptions.js";
@@ -248,7 +248,10 @@ async function handleAutoCompaction(
               message: "Auto-compacting triggered",
               contextUsage:
                 calculateContextUsagePercentage(
-                  countChatHistoryTokens(services.chatHistory.getHistory()),
+                  countChatHistoryTokens(
+                    services.chatHistory.getHistory(),
+                    model,
+                  ),
                   model,
                 ) + "%",
             }) + "\n",
@@ -362,18 +365,17 @@ async function processMessage(
   telemetryService.logUserPrompt(userInput.length, userInput);
 
   // Check if auto-compacting is needed BEFORE adding user message
-  if (shouldAutoCompact(services.chatHistory.getHistory(), model)) {
-    const newIndex = await handleAutoCompaction(
-      chatHistory,
-      model,
-      llmApi,
-      isHeadless,
-      format,
-    );
-    if (newIndex !== null) {
-      compactionIndex = newIndex;
-      // Service already updated in handleAutoCompaction via setHistory
-    }
+  // The handleAutoCompaction function decides whether compaction is actually needed
+  const autoCompactionResult = await handleAutoCompaction(
+    chatHistory,
+    model,
+    llmApi,
+    isHeadless,
+    format,
+  );
+  if (autoCompactionResult !== null) {
+    compactionIndex = autoCompactionResult;
+    // Service already updated in handleAutoCompaction via setHistory
   }
 
   // Add user message to history AFTER potential compaction
@@ -481,13 +483,36 @@ async function runHeadlessMode(
   const agentFileState = await serviceContainer.get<AgentFileServiceState>(
     SERVICE_NAMES.AGENT_FILE,
   );
-  const initialPrompt =
-    `${agentFileState?.agentFile?.prompt ?? ""}\n\n${prompt ?? ""}`.trim() ||
-    undefined;
+
+  const initialPrompt = prependPrompt(
+    agentFileState?.agentFile?.prompt,
+    prompt,
+  );
   const initialUserInput = await processAndCombinePrompts(
     options.prompt,
     initialPrompt,
   );
+
+  // Critical validation: Ensure we have actual prompt text in headless mode
+  // This prevents the CLI from hanging in TTY-less environments when question() is called
+  // We check AFTER processing all prompts (including agent files) to ensure we have real content
+  // EXCEPTION: Allow empty prompts when resuming/forking since they may just want to view history
+  if (!initialUserInput || !initialUserInput.trim()) {
+    // If resuming or forking, allow empty prompt - just exit successfully after showing history
+    if (options.resume || options.fork) {
+      // For resume/fork with no new input, we've already loaded the history above
+      // Just exit successfully (the history was already loaded into chatHistory)
+      await gracefulExit(0);
+      return;
+    }
+
+    throw new Error(
+      'Headless mode requires a prompt. Use: cn -p "your prompt"\n' +
+        'Or pipe input: echo "prompt" | cn -p\n' +
+        "Or use agent files: cn -p --agent my-org/my-agent\n" +
+        "Note: Agent files must contain a prompt field.",
+    );
+  }
 
   let isFirstMessage = true;
   while (true) {
@@ -521,6 +546,9 @@ async function runHeadlessMode(
       compactionIndex = result.compactionIndex;
     }
   }
+
+  // exit after headless mode completes
+  await gracefulExit(0);
 }
 
 export async function chat(prompt?: string, options: ChatOptions = {}) {
@@ -538,6 +566,15 @@ export async function chat(prompt?: string, options: ChatOptions = {}) {
     // Start active time tracking
     telemetryService.startActiveTime();
 
+    // Critical routing: Explicit separation of headless and interactive modes
+    if (options.headless) {
+      // Headless path - no Ink, no TUI, works in TTY-less environments
+      logger.debug("Running in headless mode (TTY-less compatible)");
+      await runHeadlessMode(prompt, options);
+      return;
+    }
+
+    // Interactive path - requires TTY for Ink rendering
     // If not in headless mode, use unified initialization with TUI
     if (!options.headless) {
       // Process flags for TUI mode
@@ -553,9 +590,10 @@ export async function chat(prompt?: string, options: ChatOptions = {}) {
         SERVICE_NAMES.AGENT_FILE,
       );
 
-      const initialPrompt =
-        `${agentFileState?.agentFile?.prompt ?? ""}\n\n${prompt ?? ""}`.trim() ||
-        undefined;
+      const initialPrompt = prependPrompt(
+        agentFileState?.agentFile?.prompt,
+        prompt,
+      );
 
       // Start TUI with skipOnboarding since we already handled it
       const tuiOptions: any = {
