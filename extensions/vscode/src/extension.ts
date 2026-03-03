@@ -13,11 +13,11 @@ export { default as buildTimestamp } from "./.buildTimestamp";
 
 async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
   await setupCa();
-  const mcpEnabled = vscode.workspace.getConfiguration("continue").get<boolean>("mcpServer.enabled", false);
-  const mcpPort = vscode.workspace.getConfiguration("continue").get<number>("mcpServer.port", 3100);
+  const mcpEnabled = vscode.workspace.getConfiguration("forge").get<boolean>("mcpServer.enabled", false);
+  const mcpPort = vscode.workspace.getConfiguration("forge").get<number>("mcpServer.port", 3100);
   if (mcpEnabled) {
-    const { start } = await import("@continue/mcp-server");
-    console.log(`Starting Continue MCP Server on port ${mcpPort}`);
+    const { start } = await import("forge-mcp");
+    console.log(`Starting Forge MCP Server on port ${mcpPort}`);
     start("sse", mcpPort);
   }
   const { activateExtension } = await import("./activation/activate");

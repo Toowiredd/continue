@@ -8,7 +8,7 @@ import { HeadlessIDE } from "./headlessIde";
 import { registerTools } from "./tools";
 import { registerResources } from "./resources";
 
-export class ContinueMcpServer {
+export class ForgeMcpServer {
   public server: Server;
   private sseTransport: SSEServerTransport | null = null;
   public core: Core;
@@ -16,10 +16,10 @@ export class ContinueMcpServer {
   constructor() {
     this.server = new Server(
       {
-        name: "continue-swe",
+        name: "forge",
         version: "1.0.0",
         description:
-          "Continue.dev as a standalone MCP server — full SWE dev toolkit (file I/O, bash, search, git, LLM chat, codebase indexing)",
+          "Forge — AI-powered SWE dev solution as a standalone MCP server. Full toolkit: file I/O, bash, code search, git, AI chat, autocomplete, slash commands, session history, model management, codebase indexing, and more.",
       },
       {
         capabilities: {
@@ -41,8 +41,7 @@ export class ContinueMcpServer {
     if (transportType === "stdio") {
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      // Use stderr so Claude Desktop / other clients can see this without polluting stdio
-      process.stderr.write("Continue SWE MCP Server running on stdio\n");
+      process.stderr.write("Forge MCP Server running on stdio\n");
     } else {
       const app = express();
 
@@ -61,16 +60,16 @@ export class ContinueMcpServer {
 
       app.listen(port, () => {
         process.stderr.write(
-          `Continue SWE MCP Server running on SSE at http://localhost:${port}/mcp\n`,
+          `Forge MCP Server running on SSE at http://localhost:${port}/mcp\n`,
         );
       });
     }
   }
 }
 
-/** Programmatic API — called by VS Code extension */
+/** Programmatic API — called by the VS Code extension */
 export const start = (transport: "stdio" | "sse" = "stdio", port?: number) => {
-  const server = new ContinueMcpServer();
+  const server = new ForgeMcpServer();
   return server.start(transport, port);
 };
 

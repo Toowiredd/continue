@@ -148,15 +148,15 @@
           "default": 60,
           "description": "The period of time in minutes between automatic syncs."
         },
-        "continue.mcpServer.enabled": {
+        "forge.mcpServer.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Start the Continue SWE MCP Server alongside the extension. Exposes 15 SWE tools (bash, read/write/edit files, search code, git diff, fetch URL, LLM chat, codebase indexing, etc.) to any MCP client."
+          "description": "Start the Forge MCP Server alongside the extension. Exposes 33 AI SWE tools (bash, read/write/edit files, search code, git diff, fetch URL, AI chat, autocomplete, slash commands, session history, model management, codebase indexing, docs indexing, and more) to any MCP client."
         },
-        "continue.mcpServer.port": {
+        "forge.mcpServer.port": {
           "type": "number",
           "default": 3100,
-          "description": "SSE transport port for the Continue SWE MCP Server (only used when continue.mcpServer.enabled is true)"
+          "description": "SSE transport port for the Forge MCP Server (only used when forge.mcpServer.enabled is true)"
         }
       }
     },
@@ -787,7 +787,7 @@
     "vscode-languageclient": "^8.0.2",
     "ws": "^8.19.0",
     "yarn": "^1.22.21",
-    "@continue/mcp-server": "file:../../packages/mcp-server"
+    "forge-mcp": "file:../../packages/mcp-server"
   },
   "overrides": {
     "vitest": {

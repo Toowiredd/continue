@@ -1,11 +1,11 @@
 {
-  "name": "@continue/mcp-server",
+  "name": "forge-mcp",
   "version": "1.0.0",
-  "description": "Continue.dev as a standalone MCP server — full SWE dev toolkit",
+  "description": "Forge — AI-powered SWE dev solution as a standalone MCP server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "continue-mcp": "./dist/index.js"
+    "forge": "./dist/index.js"
   },
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/index.js --external:@modelcontextprotocol/sdk --external:core",

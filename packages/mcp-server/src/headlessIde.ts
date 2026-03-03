@@ -10,7 +10,7 @@ export class HeadlessIDE implements IDE {
   async getIdeInfo(): Promise<IdeInfo> {
     return {
       ideType: "vscode",
-      name: "Headless MCP",
+      name: "Forge",
       version: "1.0.0",
       remoteName: "local",
       extensionVersion: "1.0.0",
